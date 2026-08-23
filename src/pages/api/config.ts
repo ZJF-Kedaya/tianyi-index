@@ -4,6 +4,7 @@ import { cloud189Login } from '../../utils/tianyiAuth'
 import { getRedisStatus } from '../../utils/tianyiSessionStore'
 import { getLoginMonitorStats } from '../../utils/tianyiLoginMonitor'
 import { isAdminReq } from './auth/check'
+import { getRuntimeConfigValue } from '../../utils/runtimeConfigStore'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // 安全：诊断端点暴露内部基础设施信息，需管理员鉴权
@@ -14,6 +15,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const U = process.env.TIANYI_USERNAME || ''
   const P = process.env.TIANYI_PASSWORD || ''
+  const runtimeU = await getRuntimeConfigValue('TIANYI_USERNAME')
+  const runtimeP = await getRuntimeConfigValue('TIANYI_PASSWORD')
+  const effectiveU = runtimeU || U
+  const effectiveP = runtimeP || P
 
   let loginTest: LoginResult | { status: string } = { status: 'not_tested' }
   if (U && P && req.query.test === '1') {
@@ -46,8 +51,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     data: {
       defaultFolderId: process.env.DEFAULT_FOLDER_ID || '-11',
       rootFolderId: '-11',
-      usernameConfigured: Boolean(U),
-      passwordConfigured: Boolean(P),
+      usernameConfigured: Boolean(effectiveU),
+      passwordConfigured: Boolean(effectiveP),
       redis: {
         initialized: redisStatus.initialized,
         error: redisStatus.error,

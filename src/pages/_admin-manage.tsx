@@ -58,13 +58,15 @@ export default function AdminManagePage({
   const [runtimeValues, setRuntimeValues] = useState<Record<string, string>>({})
   const [runtimeSecrets, setRuntimeSecrets] = useState<Record<string, string>>({})
   const [workerStatus, setWorkerStatus] = useState<any>(null)
+  const [auditLogs, setAuditLogs] = useState<any[]>([])
+  const [connectionTests, setConnectionTests] = useState<any>(null)
 
   async function callApi(action: string, extra: Record<string, unknown> = {}) {
     setLoading(true)
     setMessage(null)
     try {
       const endpoint = action.startsWith('runtime-') ? '/api/auth/runtime-config/' : action.startsWith('sync-worker') ? '/api/auth/worker/' : '/api/auth/manage/'
-      const apiAction = action === 'save-runtime-config' ? 'save' : action === 'generate-runtime-secret' ? 'generate' : action === 'sync-worker-secret' ? 'sync-secret' : action
+      const apiAction = action === 'save-runtime-config' ? 'save' : action === 'generate-runtime-secret' ? 'generate' : action === 'sync-worker-secret' ? 'sync-secret' : action === 'clear-cache' ? 'clear-cache' : action === 'toggle-webdav' ? 'toggle-webdav' : action
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -133,6 +135,48 @@ export default function AdminManagePage({
   async function syncWorkerSecret() {
     const data = await callApi('sync-worker-secret')
     if (data?.success) setMessage({ type: 'success', text: data.message })
+  }
+
+  async function toggleWebDav(enabled: boolean) {
+    const data = await callApi('toggle-webdav', { enabled })
+    if (data?.success) {
+      setMessage({ type: 'success', text: data.message })
+      loadWorkerStatus()
+    }
+  }
+
+  async function testConnections() {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/auth/runtime-config/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test' }) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '测试失败')
+      setConnectionTests(data.tests)
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || '测试失败' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function loadAuditLogs() {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/auth/runtime-config/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'audit', limit: 20 }) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '读取审计日志失败')
+      setAuditLogs(data.logs || [])
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || '读取审计日志失败' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function invalidateCaches() {
+    if (!window.confirm('这会清除所有云盘会话和 token，使旧 session 失效。是否继续？')) return
+    const data = await callApi('clear-cache')
+    if (data?.success) setMessage({ type: 'success', text: data.messages?.join('；') || '缓存已清除' })
   }
 
   async function saveProtectedRoutes() {
@@ -381,6 +425,12 @@ export default function AdminManagePage({
                     <button type="button" onClick={loadRuntimeConfig} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
                       <FontAwesomeIcon icon={faRotate} /> 读取
                     </button>
+                    <button type="button" onClick={testConnections} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      <FontAwesomeIcon icon={faCheck} /> 测试连接
+                    </button>
+                    <button type="button" onClick={loadAuditLogs} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      <FontAwesomeIcon icon={faCircleInfo} /> 审计日志
+                    </button>
                   </div>
                   {runtimeMeta ? (
                     <div className="mt-5 space-y-3">
@@ -398,13 +448,15 @@ export default function AdminManagePage({
                       <button type="button" onClick={saveRuntimeConfig} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"><FontAwesomeIcon icon={faCheck} /> 保存配置</button>
                     </div>
                   ) : <p className="mt-5 text-sm text-slate-400">点击“读取”加载配置状态。</p>}
+                  {connectionTests && <div className="mt-4 space-y-2 text-sm text-slate-600">{(Object.entries(connectionTests) as Array<[string, any]>).map(([key, item]: [string, any]) => (<div key={key} className={`border-b border-slate-100 pb-2 ${item.ok ? 'text-emerald-700' : 'text-red-700'}`}><strong>{key}</strong>：{item.message}</div>))}</div>}
+                  {auditLogs.length > 0 && <div className="mt-4 max-h-64 overflow-y-auto space-y-2 text-sm text-slate-600">{auditLogs.map((log: any) => (<div key={log.timestamp + log.action} className="border-b border-slate-100 pb-2"><code className="text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</code> <strong>{log.action}</strong> {log.key ? `key=${log.key}` : ''} {log.admin ? `admin=${log.admin}` : ''}</div>))}</div>}
                 </section>
                 <section className="py-7">
                   <div className="flex items-start justify-between gap-4">
                     <div><h2 className="text-sm font-semibold text-slate-950">Cloudflare WebDAV Worker</h2><p className="mt-2 text-sm leading-6 text-slate-500">网页只查询部署状态和同步 Worker Secret。Worker 代码部署继续使用本地 Wrangler。</p></div>
                     <button type="button" onClick={loadWorkerStatus} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"><FontAwesomeIcon icon={faRotate} /> 状态</button>
                   </div>
-                  {workerStatus && <div className="mt-4 space-y-2 text-sm text-slate-600"><p>Worker：<code>{workerStatus.workerName}</code></p><p>状态：{workerStatus.configured ? (workerStatus.reachable ? 'Cloudflare API 可访问' : '不可访问') : '未配置 Cloudflare API'}</p><p>Secret：{workerStatus.secretConfigured ? '主站已配置' : '主站未配置'}</p>{workerStatus.latest && <p>最近部署：<code>{workerStatus.latest.id}</code></p>}<button type="button" onClick={syncWorkerSecret} disabled={loading || !workerStatus.configured} className="mt-2 inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"><FontAwesomeIcon icon={faShieldHalved} /> 同步 Worker 密钥</button></div>}
+                  {workerStatus && <div className="mt-4 space-y-2 text-sm text-slate-600"><p>Worker：<code>{workerStatus.workerName}</code></p><p>状态：{workerStatus.configured ? (workerStatus.reachable ? 'Cloudflare API 可访问' : '不可访问') : '未配置 Cloudflare API'}</p><p>Secret：{workerStatus.secretConfigured ? '主站已配置' : '主站未配置'}</p><p>WebDAV 开关：{workerStatus.webdavEnabled ? '已开启' : '已关闭'}</p><p>版本：{workerStatus.latest?.version || '-'}</p><p>最后部署：{workerStatus.latest?.createdAt ? new Date(workerStatus.latest.createdAt).toLocaleString() : '-'}</p>{workerStatus.history?.length > 0 && <div className="mt-2 max-h-40 overflow-y-auto divide-y divide-slate-100"><p className="text-xs text-slate-500">最近部署：</p>{workerStatus.history.map((item: any) => (<div key={item.id} className="py-1 text-xs"><code>{item.id}</code> {item.createdAt ? new Date(item.createdAt).toLocaleString() : ''} {item.status && <span className="text-slate-500">({item.status})</span>}</div>))}</div>}<button type="button" onClick={syncWorkerSecret} disabled={loading || !workerStatus.configured} className="mt-2 inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"><FontAwesomeIcon icon={faShieldHalved} /> 同步 Worker 密钥</button><button type="button" onClick={() => toggleWebDav(!workerStatus.webdavEnabled)} disabled={loading || !workerStatus.configured} className="ml-2 inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">{workerStatus.webdavEnabled ? '关闭 WebDAV' : '开启 WebDAV'}</button></div>}
                 </section>
               </div>
             )}

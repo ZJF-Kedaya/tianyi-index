@@ -7,7 +7,10 @@ import { getTianyiUserAgent } from './tianyiUserAgent'
  * 天翼云文件操作客户端
  */
 
-const DEFAULT_FOLDER_ID = process.env.DEFAULT_FOLDER_ID || '-11'
+async function getDefaultFolderId(): Promise<string> {
+  const { getRuntimeConfigValue } = await import('./runtimeConfigStore')
+  return (await getRuntimeConfigValue('DEFAULT_FOLDER_ID')) || '-11'
+}
 
 /**
  * 简易 TTL 内存缓存。
@@ -149,7 +152,7 @@ function naturalCompare(a: string, b: string): number {
  */
 export async function getFiles(
   cookies: Record<string, string>,
-  folderId: string = DEFAULT_FOLDER_ID,
+  folderId: string,
   username?: string,
   password?: string
 ): Promise<FilesResult> {

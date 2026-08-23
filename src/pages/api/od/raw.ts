@@ -41,7 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const odTokenHeader = (req.headers['od-protected-token'] as string) ?? odpt
 
   if (isSignedToken(odTokenHeader)) {
-    const parsed = parseProtectedToken(odTokenHeader)
+    const parsed = await parseProtectedToken(odTokenHeader)
     if (!parsed.valid) {
       res.status(401).json({ error: 'Invalid or expired token' })
       return

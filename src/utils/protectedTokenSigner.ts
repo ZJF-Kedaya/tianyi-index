@@ -3,9 +3,12 @@ import { constantTimeEqual } from './constantTimeEqual'
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
 
-function getSigningKey(): string {
+async function getSigningKey(): Promise<string> {
   // Use a dedicated key so rotating or exposing another application secret does
   // not invalidate OneDrive credentials or enable token forgery.
+  const { getRuntimeConfigValue } = await import('./runtimeConfigStore')
+  const runtimeSecret = await getRuntimeConfigValue('PROTECTED_TOKEN_SECRET')
+  if (runtimeSecret) return runtimeSecret
   if (process.env.PROTECTED_TOKEN_SECRET) return process.env.PROTECTED_TOKEN_SECRET
   if (process.env.CRYPTO_SECRET) return process.env.CRYPTO_SECRET
   if (process.env.ADMIN_PASSWORD) {
@@ -21,8 +24,8 @@ export function isSignedToken(token: string): boolean {
   return token.length > 64 && token.includes('.')
 }
 
-export function signProtectedToken(path: string): string | null {
-  const key = getSigningKey()
+export async function signProtectedToken(path: string): Promise<string | null> {
+  const key = await getSigningKey()
   if (!key) return null
 
   const payload = JSON.stringify({
@@ -35,14 +38,14 @@ export function signProtectedToken(path: string): string | null {
   return Buffer.from(payload).toString('base64url') + '.' + sig
 }
 
-export function parseProtectedToken(token: string): { path: string; valid: boolean } {
+export async function parseProtectedToken(token: string): Promise<{ path: string; valid: boolean }> {
   const dot = token.lastIndexOf('.')
   if (dot === -1) return { path: '', valid: false }
 
   const payloadB64 = token.slice(0, dot)
   const sig = token.slice(dot + 1)
 
-  const key = getSigningKey()
+  const key = await getSigningKey()
   if (!key) return { path: '', valid: false }
 
   const payloadStr = Buffer.from(payloadB64, 'base64url').toString()

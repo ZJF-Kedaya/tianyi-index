@@ -12,13 +12,13 @@ function encodePayload(payload: object): string {
   return `${body}.${signature}`
 }
 
-test('signs and parses the current protected token format', () => {
-  const token = signProtectedToken('/private')
+test('signs and parses the current protected token format', async () => {
+  const token = await signProtectedToken('/private')
   assert.ok(token)
-  assert.deepEqual(parseProtectedToken(token), { path: '/private', valid: true })
+  assert.deepEqual(await parseProtectedToken(token), { path: '/private', valid: true })
 })
 
-test('rejects legacy tokens without the version marker', () => {
+test('rejects legacy tokens without the version marker', async () => {
   const legacyToken = encodePayload({ exp: Date.now() + 60_000, path: '/', nonce: 'legacy' })
-  assert.deepEqual(parseProtectedToken(legacyToken), { path: '', valid: false })
+  assert.deepEqual(await parseProtectedToken(legacyToken), { path: '', valid: false })
 })

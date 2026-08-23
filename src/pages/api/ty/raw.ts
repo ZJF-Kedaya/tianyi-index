@@ -47,7 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 防止绕过目录密码保护直接下载文件
     const odptToken = (req.query.odpt as string) || ''
     if (isSignedToken(odptToken)) {
-      const parsed = parseProtectedToken(odptToken)
+      const parsed = await parseProtectedToken(odptToken)
       if (!parsed.valid) {
         res.status(401).json({ error: 'Invalid or expired token' })
         return

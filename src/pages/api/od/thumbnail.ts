@@ -40,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const cleanPath = pathPosix.resolve('/', pathPosix.normalize(path))
 
   if (isSignedToken(odpt as string)) {
-    const parsed = parseProtectedToken(odpt as string)
+    const parsed = await parseProtectedToken(odpt as string)
     if (!parsed.valid) {
       res.status(401).json({ error: 'Invalid or expired token' })
       return

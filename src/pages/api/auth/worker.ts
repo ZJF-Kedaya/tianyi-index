@@ -11,6 +11,10 @@ function cloudflareConfig() {
   }
 }
 
+function cloudflareHeaders(token: string) {
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+}
+
 function apiUrl(accountId: string, workerName: string, suffix: string) {
   return `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}${suffix}`
 }
@@ -19,8 +23,19 @@ async function cloudflareFetch(url: string, init: RequestInit = {}) {
   const { token } = cloudflareConfig()
   return fetch(url, {
     ...init,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+    headers: { ...cloudflareHeaders(token), ...(init.headers || {}) },
   })
+}
+
+function deploymentSummary(deployment: any) {
+  return {
+    id: deployment?.id,
+    createdAt: deployment?.created_on || deployment?.createdAt,
+    source: deployment?.source,
+    strategy: deployment?.strategy,
+    version: deployment?.version || null,
+    status: deployment?.status || 'unknown',
+  }
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -46,11 +61,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     if (req.method === 'GET') {
-      const response = await cloudflareFetch(apiUrl(config.accountId, config.workerName, '/deployments'))
-      const data = await response.json()
-      if (!response.ok || !data.success) throw new Error('Cloudflare API 请求失败')
-      const latest = Array.isArray(data.result) ? data.result[0] : null
-      const workerSecret = await getRuntimeConfigValue('WEBDAV_WORKER_SECRET')
+      const [deploymentsRes, settingsRes] = await Promise.all([
+        cloudflareFetch(apiUrl(config.accountId, config.workerName, '/deployments')),
+        cloudflareFetch(apiUrl(config.accountId, config.workerName, '/settings')),
+      ])
+      const [deploymentsData, settingsData] = await Promise.all([deploymentsRes.json(), settingsRes.json()])
+      if (!deploymentsRes.ok || !deploymentsData.success) throw new Error('读取 Worker 部署失败')
+      if (!settingsRes.ok || !settingsData.success) throw new Error('读取 Worker 设置失败')
+      const latest = Array.isArray(deploymentsData.result) ? deploymentSummary(deploymentsData.result[0]) : null
+      const history = (Array.isArray(deploymentsData.result) ? deploymentsData.result : []).slice(0, 10).map(deploymentSummary)
+      const webdavEnabled = Boolean(settingsData.result?.env_vars?.WEBDAV_ENABLED ?? settingsData.result?.vars?.WEBDAV_ENABLED)
       res.status(200).json({
         success: true,
         data: {
@@ -58,28 +78,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           reachable: true,
           workerName: config.workerName,
           secretConfigured: Boolean(process.env.WEBDAV_WORKER_SECRET || process.env.CONFIG_MASTER_KEY),
-          latest: latest ? { id: latest.id, createdAt: latest.created_on || latest.createdAt, source: latest.source, strategy: latest.strategy } : null,
+          webdavEnabled,
+          latest,
+          history,
+          settings: {
+            env_vars: settingsData.result?.env_vars || settingsData.result?.vars || {},
+          },
         },
       })
       return
     }
 
-    if (req.body?.action !== 'sync-secret') {
-      res.status(400).json({ error: '不支持的 Worker 操作' })
+    if (req.body?.action === 'sync-secret') {
+      const secret = await getRuntimeConfigValue('WEBDAV_WORKER_SECRET')
+      if (!secret) {
+        res.status(503).json({ error: 'WEBDAV_WORKER_SECRET 未配置' })
+        return
+      }
+      const response = await cloudflareFetch(apiUrl(config.accountId, config.workerName, '/secrets'), {
+        method: 'PUT',
+        body: JSON.stringify({ name: 'WEBDAV_WORKER_SECRET', text: secret, type: 'secret_text' }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error('Cloudflare Worker 密钥同步失败')
+      res.status(200).json({ success: true, message: 'WebDAV Worker 密钥已同步。代码部署仍需使用 Wrangler。' })
       return
     }
-    const secret = await getRuntimeConfigValue('WEBDAV_WORKER_SECRET')
-    if (!secret) {
-      res.status(503).json({ error: 'WEBDAV_WORKER_SECRET 未配置' })
+
+    if (req.body?.action === 'toggle-webdav') {
+      const enabled = req.body.enabled === true
+      const settingsResponse = await cloudflareFetch(apiUrl(config.accountId, config.workerName, '/settings'), {
+        method: 'PUT',
+        body: JSON.stringify({ env_vars: { WEBDAV_ENABLED: enabled ? 'true' : 'false' } }),
+      })
+      const settingsData = await settingsResponse.json()
+      if (!settingsResponse.ok || !settingsData.success) throw new Error('更新 Worker 设置失败')
+      res.status(200).json({ success: true, message: enabled ? '已开启 WebDAV' : '已关闭 WebDAV' })
       return
     }
-    const response = await cloudflareFetch(apiUrl(config.accountId, config.workerName, '/secrets'), {
-      method: 'PUT',
-      body: JSON.stringify({ name: 'WEBDAV_WORKER_SECRET', text: secret, type: 'secret_text' }),
-    })
-    const data = await response.json()
-    if (!response.ok || !data.success) throw new Error('Cloudflare Worker 密钥同步失败')
-    res.status(200).json({ success: true, message: 'WebDAV Worker 密钥已同步。代码部署仍需使用 Wrangler。' })
+
+    res.status(400).json({ error: '不支持的 Worker 操作' })
   } catch (error) {
     console.error('[worker] Cloudflare API failed:', error)
     res.status(502).json({ error: error instanceof Error ? error.message : 'Cloudflare API 请求失败' })

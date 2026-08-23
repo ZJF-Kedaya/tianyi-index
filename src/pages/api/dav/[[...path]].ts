@@ -13,6 +13,7 @@ import { checkRateLimit } from '../../../utils/rateLimit'
 import { getClientIp } from '../../../utils/getClientIp'
 import { DAV_DRIVES, getDavDriveByName } from '../../../utils/driveRegistry'
 import apiConfig from '../../../../config/api.config'
+import { getRuntimeConfigValue } from '../../../utils/runtimeConfigStore'
 
 const DEFAULT_USER_ID = 'default_user'
 
@@ -25,12 +26,23 @@ const DEFAULT_USER_ID = 'default_user'
 const MAX_AUTH_FAIL_ATTEMPTS = 20
 const AUTH_FAIL_WINDOW_SEC = 15 * 60
 
-function getTyEnvUsername(): string {
-  return process.env.TIANYI_USERNAME || ''
+let cachedTyUsername: string | null = null
+let cachedTyPassword: string | null = null
+async function getTyRuntimeUsername(): Promise<string> {
+  if (cachedTyUsername === null) {
+    const { getRuntimeConfigValue } = await import('../../../utils/runtimeConfigStore')
+    cachedTyUsername = await getRuntimeConfigValue('TIANYI_USERNAME')
+  }
+  return cachedTyUsername
 }
-function getTyEnvPassword(): string {
-  return process.env.TIANYI_PASSWORD || ''
+async function getTyRuntimePassword(): Promise<string> {
+  if (cachedTyPassword === null) {
+    const { getRuntimeConfigValue } = await import('../../../utils/runtimeConfigStore')
+    cachedTyPassword = await getRuntimeConfigValue('TIANYI_PASSWORD')
+  }
+  return cachedTyPassword
 }
+
 
 function xmlEscape(s: string): string {
   return s
@@ -116,8 +128,10 @@ function parseDavPath(segments: string[]): ParsedDavPath | null {
   return { drive: drive.id, subPath }
 }
 
-function isWorkerRequest(req: NextApiRequest, pathSegments: string[]): boolean {
+async function isWorkerRequest(req: NextApiRequest, pathSegments: string[]): Promise<boolean> {
   const workerSecret = process.env.WEBDAV_WORKER_SECRET || ''
+  const runtimeWorkerSecret = await getRuntimeConfigValue('WEBDAV_WORKER_SECRET')
+  const effectiveWorkerSecret = runtimeWorkerSecret || workerSecret
   const timestamp = req.headers['x-webdav-worker-time']
   const workerPath = req.headers['x-webdav-worker-path']
   const signature = req.headers['x-webdav-worker-signature']
@@ -155,7 +169,7 @@ function isWorkerRequest(req: NextApiRequest, pathSegments: string[]): boolean {
 }
 
 async function authenticate(req: NextApiRequest, pathSegments: string[]): Promise<boolean> {
-  if (isWorkerRequest(req, pathSegments)) return true
+  if (await isWorkerRequest(req, pathSegments)) return true
 
   const authHeader = req.headers.authorization
   if (!authHeader || !authHeader.startsWith('Basic ')) return false
@@ -172,8 +186,10 @@ async function authenticate(req: NextApiRequest, pathSegments: string[]): Promis
   const password = decoded.slice(colonIdx + 1)
   if (username !== 'admin') return false
   const adminPassword = process.env.ADMIN_PASSWORD || ''
+  const runtimeAdminPassword = await getRuntimeConfigValue('ADMIN_PASSWORD')
+  const effectiveAdminPassword = runtimeAdminPassword || adminPassword
   if (!adminPassword) return false
-  return constantTimeEqual(password, adminPassword)
+  return constantTimeEqual(password, effectiveAdminPassword)
 }
 
 /**
@@ -182,8 +198,8 @@ async function authenticate(req: NextApiRequest, pathSegments: string[]): Promis
  */
 async function getTyDirListing(tyPath: string, cookies: Record<string, string>): Promise<{ resources: DavResource[] } | { error: string }> {
   const segments = tyPath.split('/').filter(Boolean)
-  const username = getTyEnvUsername()
-  const password = getTyEnvPassword()
+  const username = await getTyRuntimeUsername()
+  const password = await getTyRuntimePassword()
   // WebDAV 始终从天翼云的绝对根目录开始，不受网站展示挂载点影响
   const result = await resolveTianyiPath(cookies, segments, username, password, '-11')
 

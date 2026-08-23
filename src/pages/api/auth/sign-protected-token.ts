@@ -66,7 +66,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return
   }
 
-  const token = signProtectedToken(protectedPath)
+  const token = await signProtectedToken(protectedPath)
   if (!token) {
     res.status(500).json({ error: 'Signing key not configured' })
     return

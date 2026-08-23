@@ -3,6 +3,7 @@ import Redis from 'ioredis'
 import siteConfig from '../../config/site.config'
 
 export const RUNTIME_CONFIG_KEY = `${siteConfig.kvPrefix}runtime:config`
+export const CONFIG_AUDIT_KEY = `${siteConfig.kvPrefix}admin:config:audit`
 
 export const RUNTIME_CONFIG_KEYS = [
   'TIANYI_USERNAME',
@@ -121,4 +122,112 @@ export function isSensitiveRuntimeConfigKey(key: RuntimeConfigKey): boolean {
 
 export function generateRuntimeSecret(bytes = 32): string {
   return randomBytes(bytes).toString('hex')
+}
+
+export interface ConfigAuditEntry {
+  timestamp: number
+  action: string
+  key?: string
+  oldValue?: string
+  newValue?: string
+  admin?: string
+}
+
+export async function recordConfigAudit(entry: Omit<ConfigAuditEntry, 'timestamp'>) {
+  try {
+    if (!redis) return
+    const log: ConfigAuditEntry = { timestamp: Date.now(), ...entry }
+    await redis.lpush(CONFIG_AUDIT_KEY, JSON.stringify(log))
+    await redis.ltrim(CONFIG_AUDIT_KEY, 0, 199)
+  } catch (error) {
+    console.error('[runtimeConfig] 审计日志写入失败:', error instanceof Error ? error.message : error)
+  }
+}
+
+export async function getConfigAuditLogs(limit = 50) {
+  try {
+    if (!redis) return []
+    const raw = await redis.lrange(CONFIG_AUDIT_KEY, 0, Math.max(1, limit) - 1)
+    return raw.map(item => {
+      try {
+        return JSON.parse(item) as ConfigAuditEntry
+      } catch {
+        return null
+      }
+    }).filter(Boolean) as ConfigAuditEntry[]
+  } catch (error) {
+    console.error('[runtimeConfig] 审计日志读取失败:', error instanceof Error ? error.message : error)
+    return []
+  }
+}
+
+export async function invalidateConfigCaches(admin = 'admin') {
+  const results: string[] = []
+  try {
+    if (!redis) throw new Error('Redis 不可用')
+    const patterns = [
+      `${siteConfig.kvPrefix}ty:session:*`,
+      `${siteConfig.kvPrefix}od:token:*`,
+      `${siteConfig.kvPrefix}admin:session:*`,
+      `${siteConfig.kvPrefix}protected:token:*`,
+      `rate_limit:*`,
+    ]
+    for (const pattern of patterns) {
+      let cursor = '0'
+      let count = 0
+      while (cursor !== '0') {
+        const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', '100')
+        cursor = next
+        if (keys.length) {
+          await redis.del(...keys)
+          count += keys.length
+        }
+      }
+      results.push(`${pattern}:${count}`)
+    }
+    await recordConfigAudit({ action: 'invalidate-cache', admin })
+  } catch (error) {
+    console.error('[runtimeConfig] 缓存失效失败:', error instanceof Error ? error.message : error)
+    throw error
+  }
+  return results
+}
+
+export async function testRuntimeConfigConnections() {
+  const results: Record<string, { ok: boolean; message?: string }> = {}
+  try {
+    if (!redis) throw new Error('Redis 未配置')
+    await redis.ping()
+    results.redis = { ok: true, message: 'Redis 连接正常' }
+  } catch (error: any) {
+    results.redis = { ok: false, message: error?.message || 'Redis 连接失败' }
+  }
+
+  const tianyiUsername = await getRuntimeConfigValue('TIANYI_USERNAME')
+  const tianyiPassword = await getRuntimeConfigValue('TIANYI_PASSWORD')
+  if (tianyiUsername && tianyiPassword) {
+    try {
+      const { cloud189Login } = await import('./tianyiAuth')
+      const loginResult = await cloud189Login(tianyiUsername, tianyiPassword)
+      if (loginResult.status === 'success' && loginResult.data?.cookies) {
+        results.tianyi = { ok: true, message: '天翼云登录正常' }
+      } else {
+        results.tianyi = { ok: false, message: loginResult.message || '天翼云登录失败' }
+      }
+    } catch (error: any) {
+      results.tianyi = { ok: false, message: error?.message || '天翼云登录异常' }
+    }
+  } else {
+    results.tianyi = { ok: false, message: '未配置天翼云账号' }
+  }
+
+  const clientId = await getRuntimeConfigValue('CLIENT_ID')
+  const clientSecret = await getRuntimeConfigValue('CLIENT_SECRET')
+  if (clientId && clientSecret) {
+    results.onedrive = { ok: true, message: 'OneDrive 凭据已配置（未执行 OAuth 令牌交换测试）' }
+  } else {
+    results.onedrive = { ok: false, message: '未配置 OneDrive 凭据' }
+  }
+
+  return results
 }

@@ -5,7 +5,10 @@ import { getFiles, getDownloadLink } from './tianyiClient'
 import { getProtectedRoutes } from './protectedRoutesStore'
 import { constantTimeEqual } from './constantTimeEqual'
 
-const DEFAULT_FOLDER_ID = process.env.DEFAULT_FOLDER_ID || '-11'
+async function getDefaultFolderId(): Promise<string> {
+  const { getRuntimeConfigValue } = await import('./runtimeConfigStore')
+  return (await getRuntimeConfigValue('DEFAULT_FOLDER_ID')) || '-11'
+}
 
 /**
  * .password 内容缓存（5 分钟 TTL）。
@@ -63,7 +66,7 @@ async function resolveFolderByPath(
   username: string,
   password: string,
 ): Promise<{ folderId: string; cookies: Record<string, string> } | null> {
-  let currentFolderId = DEFAULT_FOLDER_ID
+  let currentFolderId = await getDefaultFolderId()
   for (const segment of segments) {
     const listResult = await getFiles(cookies, currentFolderId, username, password)
     if (listResult.data?.cookies) {
