@@ -30,11 +30,12 @@ interface ManageProps {
   initialProtectedRoutesOd: string[]
 }
 
-type Section = 'overview' | 'protection' | 'maintenance'
+type Section = 'overview' | 'protection' | 'configuration' | 'maintenance'
 
 const navItems: Array<{ id: Section; label: string; icon: typeof faCircleInfo }> = [
   { id: 'overview', label: '状态', icon: faCircleInfo },
   { id: 'protection', label: '访问控制', icon: faShieldHalved },
+  { id: 'configuration', label: '运行时配置', icon: faHardDrive },
   { id: 'maintenance', label: '维护', icon: faHardDrive },
 ]
 
@@ -53,15 +54,21 @@ export default function AdminManagePage({
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [saved, setSaved] = useState(false)
+  const [runtimeMeta, setRuntimeMeta] = useState<any>(null)
+  const [runtimeValues, setRuntimeValues] = useState<Record<string, string>>({})
+  const [runtimeSecrets, setRuntimeSecrets] = useState<Record<string, string>>({})
+  const [workerStatus, setWorkerStatus] = useState<any>(null)
 
   async function callApi(action: string, extra: Record<string, unknown> = {}) {
     setLoading(true)
     setMessage(null)
     try {
-      const response = await fetch('/api/auth/manage/', {
+      const endpoint = action.startsWith('runtime-') ? '/api/auth/runtime-config/' : action.startsWith('sync-worker') ? '/api/auth/worker/' : '/api/auth/manage/'
+      const apiAction = action === 'save-runtime-config' ? 'save' : action === 'generate-runtime-secret' ? 'generate' : action === 'sync-worker-secret' ? 'sync-secret' : action
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...extra }),
+        body: JSON.stringify({ action: apiAction, ...extra }),
       })
       const data = await response.json()
       if (!response.ok) {
@@ -75,6 +82,57 @@ export default function AdminManagePage({
     } finally {
       setLoading(false)
     }
+  }
+
+  async function loadRuntimeConfig() {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/auth/runtime-config/')
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '读取配置失败')
+      setRuntimeMeta(data.data)
+      const values: Record<string, string> = {}
+      for (const item of data.data.values) if (!item.sensitive && item.value !== undefined) values[item.key] = item.value || ''
+      setRuntimeValues(values)
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || '读取配置失败' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function saveRuntimeConfig() {
+    const data = await callApi('save-runtime-config', { values: { ...runtimeValues, ...runtimeSecrets } })
+    if (data?.success) {
+      setRuntimeMeta(data.data)
+      setMessage({ type: 'success', text: '运行时配置已保存。敏感配置只显示配置状态。' })
+    }
+  }
+
+  async function generateRuntimeSecret(key: string) {
+    const data = await callApi('generate-runtime-secret', { key })
+    if (!data?.value) return
+    setRuntimeSecrets(current => ({ ...current, [key]: data.value }))
+    setMessage({ type: 'success', text: `${key} 已生成，请点击保存配置` })
+  }
+
+  async function loadWorkerStatus() {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/auth/worker/')
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '读取 Worker 状态失败')
+      setWorkerStatus(data.data)
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || '读取 Worker 状态失败' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function syncWorkerSecret() {
+    const data = await callApi('sync-worker-secret')
+    if (data?.success) setMessage({ type: 'success', text: data.message })
   }
 
   async function saveProtectedRoutes() {
@@ -309,6 +367,45 @@ export default function AdminManagePage({
                     恢复环境变量
                   </button>
                 </div>
+              </div>
+            )}
+
+            {section === 'configuration' && (
+              <div className="max-w-3xl">
+                <section className="border-b border-slate-200 py-7 first:pt-0">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">运行时配置</h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-500">敏感值使用 CONFIG_MASTER_KEY 加密后存入 Redis，只显示是否已配置。未保存的字段不会改变当前服务。</p>
+                    </div>
+                    <button type="button" onClick={loadRuntimeConfig} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      <FontAwesomeIcon icon={faRotate} /> 读取
+                    </button>
+                  </div>
+                  {runtimeMeta ? (
+                    <div className="mt-5 space-y-3">
+                      {runtimeMeta.values.map((item: any) => (
+                        <div key={item.key} className="grid gap-2 border-b border-slate-100 pb-3 sm:grid-cols-[12rem_1fr_auto] sm:items-center">
+                          <label className="text-sm text-slate-600">{item.key}</label>
+                          {item.sensitive ? (
+                            <span className="text-sm text-slate-500">{item.configured ? `已配置（${item.source}）` : '未配置'}</span>
+                          ) : (
+                            <input value={runtimeValues[item.key] || ''} onChange={event => setRuntimeValues(current => ({ ...current, [item.key]: event.target.value }))} className="min-w-0 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600" />
+                          )}
+                          {item.sensitive && <button type="button" onClick={() => generateRuntimeSecret(item.key)} disabled={loading} className="text-xs text-blue-700 hover:underline disabled:opacity-50">生成密钥</button>}
+                        </div>
+                      ))}
+                      <button type="button" onClick={saveRuntimeConfig} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"><FontAwesomeIcon icon={faCheck} /> 保存配置</button>
+                    </div>
+                  ) : <p className="mt-5 text-sm text-slate-400">点击“读取”加载配置状态。</p>}
+                </section>
+                <section className="py-7">
+                  <div className="flex items-start justify-between gap-4">
+                    <div><h2 className="text-sm font-semibold text-slate-950">Cloudflare WebDAV Worker</h2><p className="mt-2 text-sm leading-6 text-slate-500">网页只查询部署状态和同步 Worker Secret。Worker 代码部署继续使用本地 Wrangler。</p></div>
+                    <button type="button" onClick={loadWorkerStatus} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"><FontAwesomeIcon icon={faRotate} /> 状态</button>
+                  </div>
+                  {workerStatus && <div className="mt-4 space-y-2 text-sm text-slate-600"><p>Worker：<code>{workerStatus.workerName}</code></p><p>状态：{workerStatus.configured ? (workerStatus.reachable ? 'Cloudflare API 可访问' : '不可访问') : '未配置 Cloudflare API'}</p><p>Secret：{workerStatus.secretConfigured ? '主站已配置' : '主站未配置'}</p>{workerStatus.latest && <p>最近部署：<code>{workerStatus.latest.id}</code></p>}<button type="button" onClick={syncWorkerSecret} disabled={loading || !workerStatus.configured} className="mt-2 inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"><FontAwesomeIcon icon={faShieldHalved} /> 同步 Worker 密钥</button></div>}
+                </section>
               </div>
             )}
 

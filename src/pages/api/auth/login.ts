@@ -5,6 +5,7 @@ import { createAdminSession } from '../../../utils/adminSessionStore'
 import { ADMIN_COOKIE_NAME, ADMIN_COOKIE_MAX_AGE, ADMIN_COOKIE_PATH, isSameOriginReq } from '../../../utils/adminAuth'
 import { checkRateLimit } from '../../../utils/rateLimit'
 import { getClientIp } from '../../../utils/getClientIp'
+import { getRuntimeConfigValue } from '../../../utils/runtimeConfigStore'
 
 /**
  * 管理员登录 API
@@ -42,7 +43,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const { password } = req.body || {}
-  const adminPassword = process.env.ADMIN_PASSWORD
+  const adminPassword = await getRuntimeConfigValue('ADMIN_PASSWORD')
 
   if (!adminPassword) {
     res.status(503).json({ error: '管理员功能未配置（ADMIN_PASSWORD 环境变量未设置）' })

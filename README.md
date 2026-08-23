@@ -72,7 +72,16 @@
 | `NEXT_PUBLIC_PDF_VIEWER_URL` | `https://mozilla.github.io/pdf.js/web/viewer.html` | PDF 在线预览器地址。如需自托管或换源可修改此变量 |
 | `WALLPAPER_UPSTREAM` | `https://api.elaina.cat/random/` | 随机壁纸上游图源地址 |
 
-### 本地开发
+### 运行时配置中心
+
+管理员登录 `/@manage` 后，在“运行时配置”中可以查看配置状态、修改非敏感配置、生成安全密钥并保存到 Redis。敏感值使用 `CONFIG_MASTER_KEY` 以 AES-256-GCM 加密后保存，主密钥只能配置在 Vercel Secret，不能放入 Redis。
+
+Cloudflare Worker 管理需要配置 `CF_API_TOKEN`、`CF_ACCOUNT_ID` 和 `CF_WORKER_NAME`。后台可以查询 Worker 部署状态并同步 `WEBDAV_WORKER_SECRET`；Worker 代码部署仍使用：
+
+```bash
+npx wrangler deploy --config workers/webdav/wrangler.jsonc
+```
+
 
 ```bash
 cp .env.example .env

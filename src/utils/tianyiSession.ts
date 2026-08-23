@@ -10,6 +10,7 @@
 
 import { cloud189Login } from './tianyiAuth'
 import { getTianyiSession, saveTianyiSession } from './tianyiSessionStore'
+import { getRuntimeConfigValue } from './runtimeConfigStore'
 
 const DEFAULT_USER_ID = 'default_user'
 
@@ -35,8 +36,8 @@ export type TianyiSessionResult = TianyiSession | { error: string }
  *          （验证码 / 密码错误 / 网络错误等），便于排查而非笼统的 "No access token"。
  */
 export async function getOrCreateTianyiSession(): Promise<TianyiSessionResult> {
-  const username = process.env.TIANYI_USERNAME || ''
-  const password = process.env.TIANYI_PASSWORD || ''
+  const username = await getRuntimeConfigValue('TIANYI_USERNAME')
+  const password = await getRuntimeConfigValue('TIANYI_PASSWORD')
 
   // 1. 从 Redis 获取已有会话（Redis 失败时 getTianyiSession 返回 null，自动降级）
   try {
