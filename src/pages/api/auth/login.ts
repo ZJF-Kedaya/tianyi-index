@@ -34,7 +34,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // 限流：基于 Redis INCR + EXPIRE，跨实例全局共享计数
   const ip = getClientIp(req)
-  const rl = await checkRateLimit(`login:ip:${ip}`, MAX_ATTEMPTS, WINDOW_SEC)
+  const rl = await checkRateLimit(`login:ip:${ip}`, MAX_ATTEMPTS, WINDOW_SEC, true)
   if (!rl.allowed) {
     res.setHeader('Retry-After', String(rl.retryAfter))
     res.status(429).json({ error: `尝试次数过多，请 ${rl.retryAfter} 秒后重试` })

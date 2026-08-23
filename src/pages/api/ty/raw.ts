@@ -6,7 +6,7 @@ import { getOrCreateTianyiSession } from '../../../utils/tianyiSession'
 import { resolveTianyiPath } from '../../../utils/tianyiPath'
 import { getDownloadLink } from '../../../utils/tianyiClient'
 import { deleteTianyiSession } from '../../../utils/tianyiSessionStore'
-import { checkProtectedRoute } from '../../../utils/protectedRouteChecker'
+import { checkProtectedRoute, findProtectedRoute } from '../../../utils/protectedRouteChecker'
 import { isSignedToken, parseProtectedToken } from '../../../utils/protectedTokenSigner'
 import { isAdminReq } from '../auth/check'
 
@@ -50,6 +50,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const parsed = parseProtectedToken(odptToken)
       if (!parsed.valid) {
         res.status(401).json({ error: 'Invalid or expired token' })
+        return
+      }
+      const protectedPath = await findProtectedRoute(cleanPath)
+      if (!protectedPath || parsed.path !== protectedPath) {
+        res.status(401).json({ error: 'Token is not bound to a protected path' })
         return
       }
       if (cleanPath !== parsed.path && !cleanPath.startsWith(parsed.path.replace(/\/?$/, '/') + '/')) {

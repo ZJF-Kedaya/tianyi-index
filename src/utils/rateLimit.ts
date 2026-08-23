@@ -8,8 +8,8 @@ import siteConfig from '../../config/site.config'
  * - 内存限流在 serverless 多实例下为近似值（每实例独立计数）；
  * - Redis 限流全局共享计数，并能跨实例生效。
  *
- * 容错策略：Redis 不可用时降级放行（与项目内其他 Redis 模块一致），
- * 避免因 Redis 故障导致登录完全不可用。
+ * 容错策略：普通业务调用可在 Redis 不可用时降级放行；认证入口可显式要求 fail-closed，
+ * 避免 Redis 故障时管理员密码限流完全失效。
  */
 
 let kv: Redis | null = null
@@ -62,10 +62,13 @@ export async function checkRateLimit(
   key: string,
   max: number,
   windowSec: number,
+  failClosed = false,
 ): Promise<RateLimitResult> {
   if (!kv) {
-    // Redis 不可用：降级放行（与原内存限流"Map 不存在则放行"语义一致）
-    return { allowed: true, count: 0, retryAfter: 0, enforced: false }
+    // Authentication callers can reject while the shared limiter is unavailable.
+    return failClosed
+      ? { allowed: false, count: 0, retryAfter: windowSec, enforced: false }
+      : { allowed: true, count: 0, retryAfter: 0, enforced: false }
   }
   try {
     const k = `${PREFIX}${key}`
@@ -85,8 +88,10 @@ export async function checkRateLimit(
     }
     return { allowed: true, count, retryAfter: 0, enforced: true }
   } catch {
-    // Redis 出错时降级放行，不阻塞业务
-    return { allowed: true, count: 0, retryAfter: 0, enforced: false }
+    // Authentication callers reject on Redis errors; ordinary callers preserve availability.
+    return failClosed
+      ? { allowed: false, count: 0, retryAfter: windowSec, enforced: false }
+      : { allowed: true, count: 0, retryAfter: 0, enforced: false }
   }
 }
 

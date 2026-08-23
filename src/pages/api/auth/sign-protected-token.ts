@@ -1,7 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { posix as pathPosix } from 'path'
 import { signProtectedToken } from '../../../utils/protectedTokenSigner'
-import { checkProtectedRoute } from '../../../utils/protectedRouteChecker'
-import { checkAuthRoute, getAccessToken } from '../od'
+import { checkProtectedRoute, findProtectedRoute } from '../../../utils/protectedRouteChecker'
+import { checkAuthRoute, getAccessToken, getAuthTokenPath } from '../od'
 import { checkRateLimit } from '../../../utils/rateLimit'
 import { getClientIp } from '../../../utils/getClientIp'
 
@@ -20,31 +21,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const { path, hash, drive } = req.body || {}
-  if (typeof path !== 'string' || typeof hash !== 'string') {
-    res.status(400).json({ error: 'Missing path or hash' })
+  if (typeof path !== 'string' || typeof hash !== 'string' || (drive !== 'ty' && drive !== 'od')) {
+    res.status(400).json({ error: 'Missing or invalid path, hash, or drive' })
     return
   }
 
+  const cleanPath = pathPosix.resolve('/', pathPosix.normalize(path))
+  let protectedPath = ''
   let authorized = false
+
   if (drive === 'od') {
     const accessToken = await getAccessToken()
     if (!accessToken) {
       res.status(503).json({ error: 'OneDrive not configured' })
       return
     }
-    const result = await checkAuthRoute(path, accessToken, hash)
-    authorized = result.code === 200
+    const authTokenPath = await getAuthTokenPath(cleanPath)
+    if (authTokenPath) {
+      protectedPath = authTokenPath.slice(0, -'/.password'.length)
+      const result = await checkAuthRoute(cleanPath, accessToken, hash)
+      authorized = result.code === 200
+    }
   } else {
-    const cookies: Record<string, string> = {}
-    const username = process.env.TIANYI_USERNAME || ''
-    const password = process.env.TIANYI_PASSWORD || ''
-    authorized = await checkProtectedRoute(path, hash, cookies, username, password)
+    protectedPath = await findProtectedRoute(cleanPath)
+    if (protectedPath) {
+      const cookies: Record<string, string> = {}
+      const username = process.env.TIANYI_USERNAME || ''
+      const password = process.env.TIANYI_PASSWORD || ''
+      authorized = await checkProtectedRoute(cleanPath, hash, cookies, username, password)
+    }
   }
 
-  if (!authorized) {
-    // 鉴权失败：按 IP 限流，防止暴力尝试目录密码哈希
+  // Never sign an arbitrary or unprotected path. The token must represent the
+  // configured protected root, otherwise it could be used as a parent-path bypass.
+  if (!protectedPath || !authorized) {
     const ip = getClientIp(req)
-    const rl = await checkRateLimit(`sign-token:fail:${ip}`, MAX_FAIL_ATTEMPTS, FAIL_WINDOW_SEC)
+    const rl = await checkRateLimit(`sign-token:fail:${ip}`, MAX_FAIL_ATTEMPTS, FAIL_WINDOW_SEC, true)
     if (!rl.allowed) {
       res.setHeader('Retry-After', String(rl.retryAfter))
       res.status(429).json({ error: `尝试次数过多，请 ${rl.retryAfter} 秒后重试` })
@@ -54,9 +66,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return
   }
 
-  const token = signProtectedToken(path)
+  const token = signProtectedToken(protectedPath)
   if (!token) {
-    res.status(500).json({ error: 'Signing key not configured (CRYPTO_SECRET or ADMIN_PASSWORD required)' })
+    res.status(500).json({ error: 'Signing key not configured' })
     return
   }
 

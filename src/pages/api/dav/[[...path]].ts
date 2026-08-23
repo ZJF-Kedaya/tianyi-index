@@ -532,7 +532,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!authOk) {
     // 认证失败：按 IP 限流，防止对 ADMIN_PASSWORD 暴力破解
     const ip = getClientIp(req)
-    const rl = await checkRateLimit(`dav:auth-fail:${ip}`, MAX_AUTH_FAIL_ATTEMPTS, AUTH_FAIL_WINDOW_SEC)
+    const rl = await checkRateLimit(`dav:auth-fail:${ip}`, MAX_AUTH_FAIL_ATTEMPTS, AUTH_FAIL_WINDOW_SEC, true)
     if (!rl.allowed) {
       res.setHeader('Retry-After', String(rl.retryAfter))
       res.setHeader('WWW-Authenticate', 'Basic realm="WebDAV"')

@@ -4,7 +4,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import axios, { AxiosResponseHeaders } from 'axios'
 
 import { driveApi, cacheControlHeader } from '../../../../config/api.config'
-import { encodePath, getAccessToken, checkAuthRoute, graphGet } from '.'
+import { encodePath, getAccessToken, checkAuthRoute, getAuthTokenPath, graphGet } from '.'
 import { isAdminReq } from '../auth/check'
 import { isSignedToken, parseProtectedToken } from '../../../utils/protectedTokenSigner'
 
@@ -44,6 +44,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const parsed = parseProtectedToken(odTokenHeader)
     if (!parsed.valid) {
       res.status(401).json({ error: 'Invalid or expired token' })
+      return
+    }
+    const authTokenPath = await getAuthTokenPath(cleanPath)
+    const protectedPath = authTokenPath ? authTokenPath.slice(0, -'/.password'.length) : ''
+    if (!protectedPath || parsed.path !== protectedPath) {
+      res.status(401).json({ error: 'Token is not bound to a protected path' })
       return
     }
     if (cleanPath !== parsed.path && !cleanPath.startsWith(parsed.path.replace(/\/?$/, '/') + '/')) {

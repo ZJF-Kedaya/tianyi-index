@@ -157,10 +157,10 @@ export async function checkProtectedRoute(
   }
 
   if (dotPassword === null) {
-    // 安全提示：受保护目录下没有 .password 文件时按设计放行（与 OneDrive-Index 一致），
-    // 但管理员可能误以为目录仍受保护。打日志便于发现"保护失效"的配置问题。
-    console.warn(`[protectedRouteChecker] 受保护路由 ${protectedRoutePath} 下未找到 .password 文件，当前按公开目录放行。请检查 .password 文件是否存在于正确位置。`)
-    return true
+    // A configured protected route must never become public because its password
+    // marker is missing or temporarily unreadable.
+    console.error(`[protectedRouteChecker] 受保护路由 ${protectedRoutePath} 下未找到或无法读取 .password 文件，拒绝访问。请检查 .password 文件和云盘会话。`)
+    return false
   }
 
   const hashedPassword = sha256(dotPassword).toString()

@@ -4,14 +4,13 @@ import { constantTimeEqual } from './constantTimeEqual'
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
 
 function getSigningKey(): string {
-  // 安全：优先使用独立 CRYPTO_SECRET 签名受保护路由 token。
-  // 回退到 ADMIN_PASSWORD 时，同一密钥同时用于管理登录和 token 签名，
-  // 若 ADMIN_PASSWORD 泄露，攻击者可同时伪造 session 和 signed token。
-  // 建议配置独立的 CRYPTO_SECRET 环境变量。
+  // Use a dedicated key so rotating or exposing another application secret does
+  // not invalidate OneDrive credentials or enable token forgery.
+  if (process.env.PROTECTED_TOKEN_SECRET) return process.env.PROTECTED_TOKEN_SECRET
   if (process.env.CRYPTO_SECRET) return process.env.CRYPTO_SECRET
   if (process.env.ADMIN_PASSWORD) {
     if (process.env.NODE_ENV !== 'production') {
-      console.warn('[protectedTokenSigner] 使用 ADMIN_PASSWORD 作为签名密钥。建议配置独立 CRYPTO_SECRET 以提升安全性。')
+      console.warn('[protectedTokenSigner] 使用 ADMIN_PASSWORD 作为签名密钥。建议配置独立 PROTECTED_TOKEN_SECRET。')
     }
     return process.env.ADMIN_PASSWORD
   }
@@ -27,6 +26,7 @@ export function signProtectedToken(path: string): string | null {
   if (!key) return null
 
   const payload = JSON.stringify({
+    v: 2,
     exp: Date.now() + TOKEN_TTL_MS,
     path,
     nonce: randomBytes(8).toString('hex'),
@@ -56,7 +56,7 @@ export function parseProtectedToken(token: string): { path: string; valid: boole
     return { path: '', valid: false }
   }
 
-  if (typeof data.exp !== 'number' || Date.now() > data.exp) return { path: '', valid: false }
+  if (data.v !== 2 || typeof data.exp !== 'number' || Date.now() > data.exp) return { path: '', valid: false }
   if (typeof data.path !== 'string') return { path: '', valid: false }
 
   return { path: data.path, valid: true }

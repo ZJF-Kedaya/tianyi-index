@@ -38,6 +38,7 @@
 | `CRYPTO_SECRET` | OneDrive 凭据加解密密钥，启用 OneDrive 时必须配置。服务端首次解密 `CLIENT_SECRET` / OAuth token 时若未配置会抛错（不再回退公开密钥）。生成建议：`openssl rand -hex 32` |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST API 地址（如 `https://xxx.upstash.io`），用于 middleware 在 Edge Runtime 中真校验 admin session。Vercel 集成 Upstash 时自动注入，无需手动填写。未配置时 middleware 仅做 cookie 存在性检查 |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST API 访问 token，与 `UPSTASH_REDIS_REST_URL` 配套。Vercel 集成 Upstash 时自动注入 |
+| `PROTECTED_TOKEN_SECRET` | 受保护目录下载令牌的独立签名密钥，建议使用 `openssl rand -hex 32` 生成。未配置时兼容回退到 `CRYPTO_SECRET`。 |
 | `WEBDAV_WORKER_SECRET` | WebDAV Cloudflare Worker 回源签名密钥，仅 Worker 和 Vercel API 之间使用。生成建议：`openssl rand -base64 48` |
 
 #### OneDrive（可选，不配置则只使用天翼云）
