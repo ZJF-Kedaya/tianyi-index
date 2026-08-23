@@ -2,7 +2,7 @@ interface Env {
   WEBDAV_WORKER_SECRET: string
 }
 
-const ORIGIN = 'https://pan.example.com'
+const ORIGIN = 'https://pan.xiegao.top'
 const FORWARDED_HEADERS = [
   'accept',
   'content-type',
@@ -75,7 +75,11 @@ async function isValidAdminPassword(password: string): Promise<boolean> {
   try {
     const response = await fetch(new URL('/api/auth/login/', ORIGIN), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: new URL(ORIGIN).origin,
+        Referer: `${new URL(ORIGIN).origin}/@login`,
+      },
       body: JSON.stringify({ password }),
       redirect: 'manual',
     })
