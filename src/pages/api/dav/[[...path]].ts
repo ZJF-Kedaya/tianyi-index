@@ -1,9 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { createHmac } from 'crypto'
-import axios from 'axios'
 import { posix as pathPosix } from 'path'
 
-import { getAccessToken } from '../od/index'
+import { getAccessToken, graphGet } from '../od/index'
 import { getFiles, getDownloadLink } from '../../../utils/tianyiClient'
 import { getOrCreateTianyiSession } from '../../../utils/tianyiSession'
 import { resolveTianyiPath } from '../../../utils/tianyiPath'
@@ -77,7 +76,7 @@ interface DavResource {
   lastModified: string
 }
 
-function buildPropfindXml(resources: DavResource[]): string {
+export function buildPropfindXml(resources: DavResource[]): string {
   const parts: string[] = [
     '<?xml version="1.0" encoding="utf-8"?>',
     '<multistatus xmlns="DAV:">',
@@ -104,7 +103,8 @@ function buildPropfindXml(resources: DavResource[]): string {
     )
   }
   parts.push('</multistatus>')
-  return parts.join('\n')
+  // 过滤掉条件拼接产生的空串（如缺失的 getcontentlength），避免 XML 里出现空行
+  return parts.filter(part => part !== '').join('\n')
 }
 
 function urlEncodePath(p: string): string {
@@ -116,7 +116,33 @@ interface ParsedDavPath {
   subPath: string
 }
 
-function parseDavPath(segments: string[]): ParsedDavPath | null {
+/**
+ * 目录列举失败的类别：
+ * - not_found：远端确认该路径不存在，应向客户端返回 404；
+ * - transient：后端故障（token 失效、上游 5xx、网络抖动等），
+ *   必须返回 5xx 而不是 404 —— 否则 WebDAV 客户端会把"临时失败"
+ *   当成"目录不存在"，表现为网盘消失 / NoSuchFileException。
+ */
+export interface DavListingError {
+  error: string
+  kind: 'not_found' | 'transient'
+}
+
+export function listingErrorStatus(kind: DavListingError['kind']): number {
+  return kind === 'not_found' ? 404 : 502
+}
+
+/**
+ * 解析 PROPFIND 的 Depth 头。RFC 4918 默认 infinity，
+ * 本服务是云盘代理，infinity 按 1 处理（有界），0 表示只返回资源自身。
+ */
+export function parseDavDepth(header: string | string[] | undefined): 0 | 1 {
+  const raw = Array.isArray(header) ? header[0] : header
+  if (raw && raw.trim() === '0') return 0
+  return 1
+}
+
+export function parseDavPath(segments: string[]): ParsedDavPath | null {
   if (segments.length === 0 || (segments.length === 1 && segments[0] === '')) {
     return { drive: 'root', subPath: '/' }
   }
@@ -197,8 +223,13 @@ async function authenticate(req: NextApiRequest, pathSegments: string[]): Promis
 /**
  * 天翼云目录列举（PROPFIND）。
  * 基于公共 resolveTianyiPath：文件路径返回单条资源，目录路径返回子项列表。
+ * 返回的 self 是请求路径自身的资源（RFC 4918 要求 PROPFIND 响应包含它），
+ * 文件路径时 self 即该文件、resources 为空；目录路径时 self 为目录本身。
  */
-async function getTyDirListing(tyPath: string, cookies: Record<string, string>): Promise<{ resources: DavResource[] } | { error: string }> {
+async function getTyDirListing(
+  tyPath: string,
+  cookies: Record<string, string>,
+): Promise<{ self: DavResource | null; resources: DavResource[] } | DavListingError> {
   const segments = tyPath.split('/').filter(Boolean)
   const username = await getTyRuntimeUsername()
   const password = await getTyRuntimePassword()
@@ -206,42 +237,46 @@ async function getTyDirListing(tyPath: string, cookies: Record<string, string>):
   const result = await resolveTianyiPath(cookies, segments, username, password, '-11')
 
   if (result.status === 'need_refresh' || result.status === 'error') {
-    return { error: result.message || '获取目录失败' }
+    return { error: result.message || '获取目录失败', kind: 'transient' }
   }
   if (result.status === 'not_found') {
-    return { error: '路径未找到' }
+    return { error: '路径未找到', kind: 'not_found' }
   }
 
   const tyDavName = getDavDriveByName('ty')?.name || '天翼云盘'
+  const baseHref = urlEncodePath(`/dav/${tyDavName}/` + segments.join('/'))
 
-  // 文件路径：返回单条文件资源
+  // 文件路径：返回单条文件资源（即自身）
   if (result.fileMeta) {
-    const requestedHref = urlEncodePath(`/dav/${tyDavName}/` + segments.join('/'))
-    const resources: DavResource[] = [
-      {
-        href: requestedHref,
-        displayName: result.fileMeta.name,
-        isCollection: false,
-        contentLength: result.fileMeta.size,
-        contentType: getMimeType(result.fileMeta.name),
-        lastModified: formatHttpDate(result.fileMeta.lastOpTime),
-      },
-    ]
-    return { resources }
+    const fileResource: DavResource = {
+      href: baseHref,
+      displayName: result.fileMeta.name,
+      isCollection: false,
+      contentLength: result.fileMeta.size,
+      contentType: getMimeType(result.fileMeta.name),
+      lastModified: formatHttpDate(result.fileMeta.lastOpTime),
+    }
+    return { self: fileResource, resources: [] }
   }
 
-  // 目录路径：列举子项
+  // 目录路径：自身 + 列举子项
   const listResult = await getFiles(result.cookies, result.folderId, username, password)
   if (listResult.status !== 'success' || !listResult.data) {
-    return { error: listResult.message || '获取目录失败' }
+    return { error: listResult.message || '获取目录失败', kind: 'transient' }
   }
 
-  const parentHref = urlEncodePath(`/dav/${tyDavName}/` + segments.join('/'))
+  const self: DavResource = {
+    href: baseHref.endsWith('/') ? baseHref : baseHref + '/',
+    displayName: segments.length > 0 ? segments[segments.length - 1] : tyDavName,
+    isCollection: true,
+    contentType: 'httpd/unix-directory',
+    lastModified: formatHttpDate(''),
+  }
 
   const resources: DavResource[] = []
 
   for (const folder of listResult.data.folders) {
-    const folderHref = parentHref.endsWith('/') ? parentHref + urlEncodePath(folder.name) + '/' : parentHref + '/' + urlEncodePath(folder.name) + '/'
+    const folderHref = baseHref.endsWith('/') ? baseHref + urlEncodePath(folder.name) + '/' : baseHref + '/' + urlEncodePath(folder.name) + '/'
     resources.push({
       href: folderHref,
       displayName: folder.name,
@@ -252,7 +287,7 @@ async function getTyDirListing(tyPath: string, cookies: Record<string, string>):
   }
 
   for (const file of listResult.data.files) {
-    const fileHref = parentHref.endsWith('/') ? parentHref + urlEncodePath(file.name) : parentHref + '/' + urlEncodePath(file.name)
+    const fileHref = baseHref.endsWith('/') ? baseHref + urlEncodePath(file.name) : baseHref + '/' + urlEncodePath(file.name)
     resources.push({
       href: fileHref,
       displayName: file.name,
@@ -263,10 +298,19 @@ async function getTyDirListing(tyPath: string, cookies: Record<string, string>):
     })
   }
 
-  return { resources }
+  return { self, resources }
 }
 
-async function getOdDirListing(odPath: string, accessToken: string): Promise<{ resources: DavResource[] } | { error: string }> {
+/**
+ * OneDrive 目录列举（PROPFIND）。
+ * 必须走 graphGet（Graph 返回 401 时自动强制刷新 token 重试一次），
+ * 之前用裸 axios 直调，token 一旦被 Graph 拒绝就把故障伪装成 404，
+ * 客户端表现为 NoSuchFileException: /OneDrive: HTTP 404。
+ */
+async function getOdDirListing(
+  odPath: string,
+  accessToken: string,
+): Promise<{ self: DavResource | null; resources: DavResource[] } | DavListingError> {
   const resolvedPath = pathPosix.resolve('/', odPath)
   const cleanPath = resolvedPath === '/' ? '/' : resolvedPath.replace(/\/$/, '')
   const isRoot = cleanPath === '/'
@@ -276,49 +320,53 @@ async function getOdDirListing(odPath: string, accessToken: string): Promise<{ r
   }
   const requestPath = encodePath(cleanPath)
   const requestUrl = `${apiConfig.driveApi}/root${requestPath}`
+  const graphParams = { select: 'name,size,id,lastModifiedDateTime,folder,file' }
 
   try {
-    const { data: identityData } = await axios.get(requestUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { select: 'name,size,id,lastModifiedDateTime,folder,file' },
-    })
+    const { data: identityData } = await graphGet(requestUrl, { params: graphParams }, accessToken)
 
+    // 请求路径自身的资源（RFC 4918：PROPFIND 响应必须包含请求资源）
     if (!('folder' in identityData)) {
-      const parentHref = urlEncodePath('/dav/OneDrive/' + odPath.replace(/^\//, ''))
-      const resources: DavResource[] = [
-        {
-          href: parentHref,
-          displayName: identityData.name || 'unknown',
-          isCollection: false,
-          contentLength: identityData.size || 0,
-          contentType: (identityData.file?.mimeType) || getMimeType(identityData.name || ''),
-          lastModified: formatHttpDate(identityData.lastModifiedDateTime),
-        },
-      ]
-      return { resources }
+      const fileResource: DavResource = {
+        href: urlEncodePath(`/dav/OneDrive${cleanPath}`),
+        displayName: identityData.name || 'unknown',
+        isCollection: false,
+        contentLength: identityData.size || 0,
+        contentType: identityData.file?.mimeType || getMimeType(identityData.name || ''),
+        lastModified: formatHttpDate(identityData.lastModifiedDateTime),
+      }
+      return { self: fileResource, resources: [] }
     }
 
-    const parentHref = urlEncodePath('/dav/OneDrive/' + odPath.replace(/^\//, ''))
-    const parentDisplayName = cleanPath === '/' ? 'OneDrive' : (identityData.name || 'OneDrive')
-
-    const resources: DavResource[] = []
+    const selfHref = urlEncodePath(`/dav/OneDrive${cleanPath}`) + (cleanPath === '/' ? '' : '/')
+    const self: DavResource = {
+      href: selfHref,
+      displayName: cleanPath === '/' ? 'OneDrive' : identityData.name || 'OneDrive',
+      isCollection: true,
+      contentType: 'httpd/unix-directory',
+      lastModified: formatHttpDate(identityData.lastModifiedDateTime),
+    }
 
     const childrenUrl = isRoot ? `${apiConfig.driveApi}/root/children` : `${requestUrl}:/children`
-    const { data: folderData } = await axios.get(childrenUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: {
-        select: 'name,size,id,lastModifiedDateTime,folder,file',
-        $top: 200,
+    const { data: folderData } = await graphGet(
+      childrenUrl,
+      {
+        params: {
+          select: 'name,size,id,lastModifiedDateTime,folder,file',
+          $top: 200,
+        },
       },
-    })
+      accessToken,
+    )
 
+    const parentBase = selfHref.endsWith('/') ? selfHref : selfHref + '/'
+
+    const resources: DavResource[] = []
     const children = folderData.value || []
     for (const child of children) {
       const isCol = 'folder' in child
       const childName: string = child.name || 'unknown'
-      const childHrefEncoded = urlEncodePath(childName)
-      const baseHref = parentHref === '/dav/OneDrive/' ? '/dav/OneDrive/' : parentHref + '/'
-      const href = isCol ? baseHref + childHrefEncoded + '/' : baseHref + childHrefEncoded
+      const href = parentBase + urlEncodePath(childName) + (isCol ? '/' : '')
       resources.push({
         href,
         displayName: childName,
@@ -329,12 +377,12 @@ async function getOdDirListing(odPath: string, accessToken: string): Promise<{ r
       })
     }
 
-    return { resources }
+    return { self, resources }
   } catch (error: any) {
     if (error?.response?.status === 404) {
-      return { error: '路径未找到' }
+      return { error: '路径未找到', kind: 'not_found' }
     }
-    return { error: `OneDrive 请求失败: ${error?.message || '未知错误'}` }
+    return { error: `OneDrive 请求失败: ${error?.message || '未知错误'}`, kind: 'transient' }
   }
 }
 
@@ -346,8 +394,10 @@ async function getOdDirListing(odPath: string, accessToken: string): Promise<{ r
 async function getVirtualRootResources(): Promise<{ resources: DavResource[] }> {
   const resources: DavResource[] = []
   for (const drive of DAV_DRIVES) {
+    // href 统一百分号编码：中文盘名若以原始 UTF-8 出现在 href 里，
+    // 部分客户端构造子请求时会处理失败
     resources.push({
-      href: `/dav/${drive.name}/`,
+      href: urlEncodePath(`/dav/${drive.name}/`),
       displayName: drive.name,
       isCollection: true,
       contentType: 'httpd/unix-directory',
@@ -357,89 +407,76 @@ async function getVirtualRootResources(): Promise<{ resources: DavResource[] }> 
   return { resources }
 }
 
+/** 列举失败时返回的 XML 体（保持 multistatus 形状，兼容按体解析的客户端） */
+function sendListingError(res: NextApiResponse, requestUrl: string | undefined, status: number): void {
+  res.status(status).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
+    buildPropfindXml([
+      {
+        href: requestUrl || '/dav/',
+        displayName: 'Error',
+        isCollection: true,
+        lastModified: formatHttpDate(''),
+      },
+    ]),
+  )
+}
+
 async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath: ParsedDavPath): Promise<void> {
+  const depth = parseDavDepth(req.headers['depth'])
 
   try {
+    let self: DavResource | null = null
     let resources: DavResource[] = []
+
     if (davPath.drive === 'root') {
+      // RFC 4918 §9.1：Depth 0/1 响应都必须包含请求资源自身。
+      // 缺少自身条目会让部分客户端（Windows 重定向器等）挂载层级异常，
+      // 也是"有的软件只显示一个网盘"的诱因之一。
+      self = {
+        href: urlEncodePath('/dav/'),
+        displayName: 'dav',
+        isCollection: true,
+        contentType: 'httpd/unix-directory',
+        lastModified: formatHttpDate(''),
+      }
       const result = await getVirtualRootResources()
       resources = result.resources
     } else if (davPath.drive === 'ty') {
       const session = await getOrCreateTianyiSession()
       if ('error' in session) {
-        res.status(502).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
-          buildPropfindXml([
-            {
-              href: req.url || '/dav/',
-              displayName: 'Error',
-              isCollection: true,
-              lastModified: formatHttpDate(''),
-            },
-          ]),
-        )
+        // 会话故障是临时性问题，返回 502 而非 404，避免客户端把网盘当成不存在
+        sendListingError(res, req.url, 502)
         return
       }
       const result = await getTyDirListing(davPath.subPath, session.cookies)
       if ('error' in result) {
-        res.status(404).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
-          buildPropfindXml([
-            {
-              href: req.url || '/dav/',
-              displayName: 'Error',
-              isCollection: true,
-              lastModified: formatHttpDate(''),
-            },
-          ]),
-        )
+        sendListingError(res, req.url, listingErrorStatus(result.kind))
         return
       }
+      self = result.self
       resources = result.resources
     } else if (davPath.drive === 'od') {
       const accessToken = await getAccessToken()
       if (!accessToken) {
-        res.status(502).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
-          buildPropfindXml([
-            {
-              href: req.url || '/dav/',
-              displayName: 'Error',
-              isCollection: true,
-              lastModified: formatHttpDate(''),
-            },
-          ]),
-        )
+        sendListingError(res, req.url, 502)
         return
       }
       const result = await getOdDirListing(davPath.subPath, accessToken)
       if ('error' in result) {
-        res.status(404).setHeader('Content-Type', 'text/xml; charset="utf-8"').send(
-          buildPropfindXml([
-            {
-              href: req.url || '/dav/',
-              displayName: 'Error',
-              isCollection: true,
-              lastModified: formatHttpDate(''),
-            },
-          ]),
-        )
+        sendListingError(res, req.url, listingErrorStatus(result.kind))
         return
       }
+      self = result.self
       resources = result.resources
     }
 
-    const xml = buildPropfindXml(resources)
+    const bodyResources = depth === 0 ? (self ? [self] : []) : self ? [self, ...resources] : resources
+
+    const xml = buildPropfindXml(bodyResources)
     res.status(207).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(xml)
   } catch (e: any) {
     console.error('[dav] PROPFIND error:', e?.message)
-    res.status(500).setHeader('Content-Type', 'text/xml; charset="utf-8"').send(
-      buildPropfindXml([
-        {
-          href: req.url || '/dav/',
-          displayName: 'Error',
-          isCollection: true,
-          lastModified: formatHttpDate(''),
-        },
-      ]),
-    )
+    sendListingError(res, req.url, 500)
   }
 }
 
@@ -489,10 +526,8 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, davPath: Par
         return ':' + encodeURIComponent(p.replace(/^\//, ''))
       }
       const requestUrl = `${apiConfig.driveApi}/root${encodePath(cleanPath)}`
-      const { data } = await axios.get(requestUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        params: { select: 'id,@microsoft.graph.downloadUrl' },
-      })
+      // 与网页端一致走 graphGet：token 过期自动刷新重试，避免下载链接突然失效
+      const { data } = await graphGet(requestUrl, { params: { select: 'id,@microsoft.graph.downloadUrl' } }, accessToken)
       if ('@microsoft.graph.downloadUrl' in data) {
         res.redirect(302, data['@microsoft.graph.downloadUrl'])
       } else {
@@ -501,12 +536,17 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, davPath: Par
     }
   } catch (e: any) {
     console.error('[dav] GET error:', e?.message)
-    res.status(500).json({ error: 'Internal server error' })
+    // 仅远端确认不存在才 404；其余（token/网络/上游故障）一律 502
+    const notFound = e?.response?.status === 404
+    res.status(notFound ? 404 : 502).json({ error: notFound ? '文件未找到' : 'Internal server error' })
   }
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'OPTIONS') {
+    // 部分客户端挂载前会用 OPTIONS 探测服务器能力，需要带上 DAV/Allow 头
+    res.setHeader('DAV', '1')
+    res.setHeader('Allow', 'GET, HEAD, PROPFIND, OPTIONS')
     res.status(200).end()
     return
   }
@@ -542,9 +582,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await handleGet(req, res, davPath)
   } else if (req.method === 'HEAD') {
     await handleGet(req, res, davPath)
-  } else if (req.method === 'OPTIONS') {
-    res.setHeader('Allow', 'GET, HEAD, PROPFIND, OPTIONS')
-    res.status(200).end()
   } else {
     res.status(405).json({ error: 'Method not allowed' })
   }

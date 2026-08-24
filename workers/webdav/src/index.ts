@@ -1,8 +1,10 @@
 interface Env {
   WEBDAV_WORKER_SECRET: string
+  /** 可选：回源地址覆盖（默认 https://pan.xiegao.top），便于本地联调 */
+  UPSTREAM_ORIGIN?: string
 }
 
-const ORIGIN = 'https://pan.xiegao.top'
+const DEFAULT_UPSTREAM_ORIGIN = 'https://pan.xiegao.top'
 const FORWARDED_HEADERS = [
   'accept',
   'authorization',
@@ -15,7 +17,13 @@ const FORWARDED_HEADERS = [
   'user-agent',
 ]
 const PASSWORD_CACHE_TTL_MS = 5 * 60_000
+/** 上游最多内部跟随的重定向次数（Next.js trailingSlash 会产生 308） */
+const MAX_REDIRECT_HOPS = 3
 const passwordCache = new Map<string, number>()
+
+function getUpstreamOrigin(env: Env): string {
+  return (env.UPSTREAM_ORIGIN || DEFAULT_UPSTREAM_ORIGIN).replace(/\/+$/, '')
+}
 
 function unauthorized(): Response {
   return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -67,19 +75,19 @@ async function passwordCacheKey(password: string): Promise<string> {
   return btoa(binary)
 }
 
-async function isValidAdminPassword(password: string): Promise<boolean> {
+async function isValidAdminPassword(password: string, origin: string): Promise<boolean> {
   const cacheKey = await passwordCacheKey(password)
   if ((passwordCache.get(cacheKey) || 0) > Date.now()) {
     return true
   }
 
   try {
-    const response = await fetch(new URL('/api/auth/login/', ORIGIN), {
+    const response = await fetch(new URL('/api/auth/login/', origin), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Origin: new URL(ORIGIN).origin,
-        Referer: `${new URL(ORIGIN).origin}/@login`,
+        Origin: origin,
+        Referer: `${origin}/@login`,
       },
       body: JSON.stringify({ password }),
       redirect: 'manual',
@@ -101,15 +109,30 @@ function toDavPath(pathname: string): string | null {
   return pathname === '/dav' ? '/dav/' : pathname
 }
 
-function getOriginUrl(url: URL, davPath: string): URL {
+/**
+ * 把上游（Vercel）路径映射回 Worker 的 dav 路径空间，无法映射时返回 null。
+ * 例如 /api/dav/OneDrive/ -> /dav/OneDrive/
+ */
+function davPathFromUpstreamPathname(pathname: string): string | null {
+  if (pathname === '/api/dav') return '/dav/'
+  if (pathname.startsWith('/api/dav/')) return '/dav' + pathname.slice('/api/dav'.length)
+  return null
+}
+
+function getOriginUrl(origin: string, davPath: string, search: string): URL {
   const davPrefix = '/dav'
   const suffix = davPath === davPrefix ? '/' : davPath.slice(davPrefix.length)
-  return new URL(`/api/dav${suffix}${url.search}`, ORIGIN)
+  return new URL(`/api/dav${suffix}${search}`, origin)
+}
+
+function isRedirect(status: number): boolean {
+  return status >= 300 && status < 400
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+    const origin = getUpstreamOrigin(env)
     const workerPath = toDavPath(url.pathname)
     if (!workerPath) {
       return new Response('Not found', { status: 404 })
@@ -117,32 +140,80 @@ export default {
 
     if (request.method !== 'OPTIONS') {
       const credentials = getBasicCredentials(request)
-      if (!credentials || credentials.username !== 'admin' || !(await isValidAdminPassword(credentials.password))) {
+      if (!credentials || credentials.username !== 'admin' || !(await isValidAdminPassword(credentials.password, origin))) {
         return unauthorized()
       }
     }
 
-    const timestamp = String(Date.now())
-    const signaturePayload = `${timestamp}\n${request.method}\n${workerPath}`
-    const headers = new Headers()
-    for (const name of FORWARDED_HEADERS) {
-      const value = request.headers.get(name)
-      if (value) headers.set(name, value)
-    }
-    headers.set('X-WebDAV-Worker-Time', timestamp)
-    headers.set('X-WebDAV-Worker-Path', workerPath)
-    headers.set('X-WebDAV-Worker-Signature', await sign(signaturePayload, env.WEBDAV_WORKER_SECRET))
+    // 缓冲请求体：跟随重定向重放时需要复用（PROPFIND 的请求体通常只有几 KB）
+    const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
+    const bodyBuffer = hasBody ? await request.arrayBuffer() : undefined
 
-    const upstream = await fetch(getOriginUrl(url, workerPath), {
-      method: request.method,
-      headers,
-      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
-      redirect: 'manual',
-    })
+    /**
+     * 在 Worker 内部跟随上游重定向，而不是把 3xx 原样丢给客户端：
+     * - 很多 WebDAV 客户端不会对 PROPFIND 跟随重定向；
+     * - 即便跟随，Next.js 返回的 Location 指向源站域名，
+     *   客户端跳过去后丢失 Worker 签名/认证，最终表现为 401/404。
+     */
+    let currentDavPath = workerPath
+    let currentSearch = url.search
+    let upstream: Response | null = null
+
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+      const timestamp = String(Date.now())
+      const signaturePayload = `${timestamp}\n${request.method}\n${currentDavPath}`
+      const headers = new Headers()
+      for (const name of FORWARDED_HEADERS) {
+        const value = request.headers.get(name)
+        if (value) headers.set(name, value)
+      }
+      headers.set('X-WebDAV-Worker-Time', timestamp)
+      headers.set('X-WebDAV-Worker-Path', currentDavPath)
+      headers.set('X-WebDAV-Worker-Signature', await sign(signaturePayload, env.WEBDAV_WORKER_SECRET))
+
+      upstream = await fetch(getOriginUrl(origin, currentDavPath, currentSearch), {
+        method: request.method,
+        headers,
+        body: bodyBuffer,
+        redirect: 'manual',
+      })
+
+      if (!isRedirect(upstream.status)) break
+
+      const location = upstream.headers.get('location')
+      if (!location) break
+      const next = new URL(location, getOriginUrl(origin, currentDavPath, currentSearch))
+      const mapped = next.origin === origin ? davPathFromUpstreamPathname(next.pathname) : null
+      if (!mapped) break
+      currentDavPath = mapped
+      currentSearch = next.search
+    }
+
+    if (!upstream) {
+      return new Response('Upstream fetch failed', { status: 502 })
+    }
 
     const responseHeaders = new Headers(upstream.headers)
     responseHeaders.set('Cache-Control', 'no-store')
     responseHeaders.delete('Set-Cookie')
+
+    // 兜底：仍有未跟随的 3xx 时，把 Location 改写回 Worker 的路径空间，
+    // 绝不把源站域名泄漏给客户端
+    if (isRedirect(upstream.status) && responseHeaders.has('location')) {
+      try {
+        const location = responseHeaders.get('location') as string
+        const next = new URL(location, getOriginUrl(origin, currentDavPath, currentSearch))
+        const mapped = next.origin === origin ? davPathFromUpstreamPathname(next.pathname) : null
+        if (mapped) {
+          responseHeaders.set('location', `${mapped}${next.search}`)
+        } else {
+          responseHeaders.delete('location')
+        }
+      } catch {
+        responseHeaders.delete('location')
+      }
+    }
+
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,

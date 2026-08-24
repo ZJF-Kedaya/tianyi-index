@@ -114,6 +114,7 @@ WebDAV 客户端配置：
 - `workers/webdav` 中的 Cloudflare Worker 负责接收 WebDAV 客户端请求和 Basic Auth。
 - Worker 调用现有 `/api/auth/login/` 校验管理员密码，避免在 Worker 中保存管理员密码副本。
 - Worker 使用 `WEBDAV_WORKER_SECRET` 对回源请求做短时 HMAC 签名，Vercel 的 `/api/dav/[[...path]]` 只信任该签名或直接 Basic Auth。
+- Worker 会在内部跟随上游的重定向（如 trailingSlash 308）并改写 `Location` 头，源站域名不会泄漏给客户端；可用环境变量 `UPSTREAM_ORIGIN` 覆盖回源地址（默认 `https://pan.xiegao.top`）。
 - Worker 路由绑定为 `dav.example.com/*`，因此主站 `pan.example.com` 可以保持 DNS-only 灰云直连 Vercel，不影响正常网页访问。
 
 部署/更新 Worker：
@@ -129,6 +130,11 @@ Cloudflare DNS 需要有：
 | `CNAME` | `dav` | `tianyi-webdav.example.workers.dev` | Proxied（橙云） |
 
 当前 WebDAV 仅支持目录浏览和文件下载（`PROPFIND` / `GET` / `HEAD` / `OPTIONS`），不支持上传、删除、移动等写操作。
+
+协议说明：
+
+- `PROPFIND` 支持 `Depth: 0`（仅资源自身）与 `Depth: 1`（自身 + 子项），响应始终包含请求资源自身的条目（RFC 4918 §9.1）。
+- 错误码语义：仅当远端确认路径不存在时返回 `404`；后端临时故障（token 失效、上游 5xx、网络抖动）一律返回 `502`，客户端应重试而不是把网盘当作已删除。
 
 ### OneDrive OAuth 授权流程
 
