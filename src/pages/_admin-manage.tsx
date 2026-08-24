@@ -36,7 +36,7 @@ const navItems: Array<{ id: Section; label: string; icon: typeof faCircleInfo }>
   { id: 'overview', label: '状态', icon: faCircleInfo },
   { id: 'protection', label: '访问控制', icon: faShieldHalved },
   { id: 'configuration', label: '运行时配置', icon: faHardDrive },
-  { id: 'maintenance', label: '维护', icon: faHardDrive },
+  { id: 'maintenance', label: '维护', icon: faRightFromBracket },
 ]
 
 export default function AdminManagePage({
@@ -417,20 +417,22 @@ export default function AdminManagePage({
             {section === 'configuration' && (
               <div className="max-w-3xl">
                 <section className="border-b border-slate-200 py-7 first:pt-0">
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <h2 className="text-sm font-semibold text-slate-950">运行时配置</h2>
                       <p className="mt-2 text-sm leading-6 text-slate-500">敏感值使用 CONFIG_MASTER_KEY 加密后存入 Redis，只显示是否已配置。未保存的字段不会改变当前服务。</p>
                     </div>
-                    <button type="button" onClick={loadRuntimeConfig} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
-                      <FontAwesomeIcon icon={faRotate} /> 读取
-                    </button>
-                    <button type="button" onClick={testConnections} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
-                      <FontAwesomeIcon icon={faCheck} /> 测试连接
-                    </button>
-                    <button type="button" onClick={loadAuditLogs} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
-                      <FontAwesomeIcon icon={faCircleInfo} /> 审计日志
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={loadRuntimeConfig} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                        <FontAwesomeIcon icon={faRotate} /> 读取
+                      </button>
+                      <button type="button" onClick={testConnections} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                        <FontAwesomeIcon icon={faCheck} /> 测试连接
+                      </button>
+                      <button type="button" onClick={loadAuditLogs} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                        <FontAwesomeIcon icon={faCircleInfo} /> 审计日志
+                      </button>
+                    </div>
                   </div>
                   {runtimeMeta ? (
                     <div className="mt-5 space-y-3">
@@ -452,11 +454,11 @@ export default function AdminManagePage({
                   {auditLogs.length > 0 && <div className="mt-4 max-h-64 overflow-y-auto space-y-2 text-sm text-slate-600">{auditLogs.map((log: any) => (<div key={log.timestamp + log.action} className="border-b border-slate-100 pb-2"><code className="text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</code> <strong>{log.action}</strong> {log.key ? `key=${log.key}` : ''} {log.admin ? `admin=${log.admin}` : ''}</div>))}</div>}
                 </section>
                 <section className="py-7">
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div><h2 className="text-sm font-semibold text-slate-950">Cloudflare WebDAV Worker</h2><p className="mt-2 text-sm leading-6 text-slate-500">网页只查询部署状态和同步 Worker Secret。Worker 代码部署继续使用本地 Wrangler。</p></div>
                     <button type="button" onClick={loadWorkerStatus} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"><FontAwesomeIcon icon={faRotate} /> 状态</button>
                   </div>
-                  {workerStatus && <div className="mt-4 space-y-2 text-sm text-slate-600"><p>Worker：<code>{workerStatus.workerName}</code></p><p>状态：{workerStatus.configured ? (workerStatus.reachable ? 'Cloudflare API 可访问' : '不可访问') : '未配置 Cloudflare API'}</p><p>Secret：{workerStatus.secretConfigured ? '主站已配置' : '主站未配置'}</p><p>WebDAV 开关：{workerStatus.webdavEnabled ? '已开启' : '已关闭'}</p><p>版本：{workerStatus.latest?.version || '-'}</p><p>最后部署：{workerStatus.latest?.createdAt ? new Date(workerStatus.latest.createdAt).toLocaleString() : '-'}</p>{workerStatus.history?.length > 0 && <div className="mt-2 max-h-40 overflow-y-auto divide-y divide-slate-100"><p className="text-xs text-slate-500">最近部署：</p>{workerStatus.history.map((item: any) => (<div key={item.id} className="py-1 text-xs"><code>{item.id}</code> {item.createdAt ? new Date(item.createdAt).toLocaleString() : ''} {item.status && <span className="text-slate-500">({item.status})</span>}</div>))}</div>}<button type="button" onClick={syncWorkerSecret} disabled={loading || !workerStatus.configured} className="mt-2 inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"><FontAwesomeIcon icon={faShieldHalved} /> 同步 Worker 密钥</button><button type="button" onClick={() => toggleWebDav(!workerStatus.webdavEnabled)} disabled={loading || !workerStatus.configured} className="ml-2 inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">{workerStatus.webdavEnabled ? '关闭 WebDAV' : '开启 WebDAV'}</button></div>}
+                  {workerStatus && <div className="mt-4 space-y-2 text-sm text-slate-600"><p>Worker：<code>{workerStatus.workerName}</code></p><p>状态：{workerStatus.configured ? (workerStatus.reachable ? 'Cloudflare API 可访问' : '不可访问') : '未配置 Cloudflare API'}</p><p>Secret：{workerStatus.secretConfigured ? '主站已配置' : '主站未配置'}</p><p>WebDAV 开关：{workerStatus.webdavEnabled ? '已开启' : '已关闭'}</p><p>版本：{workerStatus.latest?.version || '-'}</p><p>最后部署：{workerStatus.latest?.createdAt ? new Date(workerStatus.latest.createdAt).toLocaleString() : '-'}</p>{workerStatus.history?.length > 0 && <div className="mt-2 max-h-40 overflow-y-auto divide-y divide-slate-100"><p className="text-xs text-slate-500">最近部署：</p>{workerStatus.history.map((item: any) => (<div key={item.id} className="py-1 text-xs"><code>{item.id}</code> {item.createdAt ? new Date(item.createdAt).toLocaleString() : ''} {item.status && <span className="text-slate-500">({item.status})</span>}</div>))}</div>}<div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={syncWorkerSecret} disabled={loading || !workerStatus.configured} className="inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"><FontAwesomeIcon icon={faShieldHalved} /> 同步 Worker 密钥</button><button type="button" onClick={() => toggleWebDav(!workerStatus.webdavEnabled)} disabled={loading || !workerStatus.configured} className="inline-flex min-h-[40px] items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">{workerStatus.webdavEnabled ? '关闭 WebDAV' : '开启 WebDAV'}</button></div></div>}
                 </section>
               </div>
             )}

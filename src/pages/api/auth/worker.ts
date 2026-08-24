@@ -29,10 +29,10 @@ async function cloudflareFetch(url: string, init: RequestInit = {}) {
 
 function deploymentSummary(deployment: any) {
   return {
-    id: deployment?.id,
-    createdAt: deployment?.created_on || deployment?.createdAt,
-    source: deployment?.source,
-    strategy: deployment?.strategy,
+    id: deployment?.id || '-',
+    createdAt: deployment?.created_on || deployment?.createdAt || '-',
+    source: deployment?.source || '-',
+    strategy: deployment?.strategy || '-',
     version: deployment?.version || null,
     status: deployment?.status || 'unknown',
   }
@@ -70,7 +70,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!settingsRes.ok || !settingsData.success) throw new Error('读取 Worker 设置失败')
       const latest = Array.isArray(deploymentsData.result) ? deploymentSummary(deploymentsData.result[0]) : null
       const history = (Array.isArray(deploymentsData.result) ? deploymentsData.result : []).slice(0, 10).map(deploymentSummary)
-      const webdavEnabled = Boolean(settingsData.result?.env_vars?.WEBDAV_ENABLED ?? settingsData.result?.vars?.WEBDAV_ENABLED)
+      const explicitWebDav = settingsData.result?.env_vars?.WEBDAV_ENABLED ?? settingsData.result?.vars?.WEBDAV_ENABLED
+      const webdavEnabled = explicitWebDav === 'false' || explicitWebDav === false ? false : true
       res.status(200).json({
         success: true,
         data: {
