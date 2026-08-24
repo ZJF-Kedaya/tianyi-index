@@ -2,8 +2,8 @@ import sha256 from 'crypto-js/sha256'
 import siteConfig from '../../config/site.config'
 import { constantTimeEqual } from './constantTimeEqual'
 
-/** 云盘类型：ty=天翼云，od=OneDrive */
-export type Drive = 'ty' | 'od'
+/** 云盘类型：ty=天翼云，od=OneDrive，p123=123云盘 */
+export type Drive = 'ty' | 'od' | 'p123'
 
 /**
  * 从 apiBase 推导云盘类型

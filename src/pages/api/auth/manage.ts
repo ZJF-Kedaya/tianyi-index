@@ -10,6 +10,7 @@ import {
   setProtectedRoutesOd,
   resetProtectedRoutes,
 } from '../../../utils/protectedRoutesStore'
+import { testRuntimeConfigConnections } from '../../../utils/runtimeConfigStore'
 
 /**
  * 管理员操作 API
@@ -24,6 +25,7 @@ import {
  * - 'get-protected-routes'：获取私密目录列表
  * - 'set-protected-routes'：设置私密目录列表
  * - 'reset-protected-routes'：重置为环境变量配置
+ * - 'test-connections'：测试各网盘连接状态（存储管理页用）
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -55,6 +57,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return await handleSetProtectedRoutes(req, res)
       case 'reset-protected-routes':
         return await handleResetProtectedRoutes(req, res)
+      case 'test-connections':
+        return await handleTestConnections(req, res)
       default:
         res.status(400).json({ error: `未知操作: ${action}` })
     }
@@ -135,4 +139,11 @@ async function handleSetProtectedRoutes(req: NextApiRequest, res: NextApiRespons
 async function handleResetProtectedRoutes(_req: NextApiRequest, res: NextApiResponse) {
   await resetProtectedRoutes()
   res.status(200).json({ success: true, messages: ['已重置为环境变量配置'] })
+}
+
+
+/** 测试各网盘连接（存储管理页） */
+async function handleTestConnections(req: NextApiRequest, res: NextApiResponse) {
+  const results = await testRuntimeConfigConnections()
+  res.status(200).json({ success: true, data: results })
 }

@@ -8,8 +8,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faCheck,
   faCircleInfo,
+  faCloud,
   faHardDrive,
   faLock,
+  faPlug,
   faPlus,
   faRightFromBracket,
   faRotate,
@@ -30,13 +32,27 @@ interface ManageProps {
   initialProtectedRoutesOd: string[]
 }
 
-type Section = 'overview' | 'protection' | 'configuration' | 'maintenance'
+type Section = 'overview' | 'storages' | 'protection' | 'configuration' | 'maintenance'
 
 const navItems: Array<{ id: Section; label: string; icon: typeof faCircleInfo }> = [
   { id: 'overview', label: '状态', icon: faCircleInfo },
+  { id: 'storages', label: '存储管理', icon: faCloud },
   { id: 'protection', label: '访问控制', icon: faShieldHalved },
   { id: 'configuration', label: '运行时配置', icon: faHardDrive },
   { id: 'maintenance', label: '维护', icon: faRightFromBracket },
+]
+
+/** 存储管理页展示的网盘卡片元数据 */
+const DRIVE_CARDS: Array<{
+  key: string
+  name: string
+  mount: string
+  enabled: boolean
+  configHint: string
+}> = [
+  { key: 'tianyi', name: '天翼云盘', mount: siteConfig.tianyiMountPath, enabled: Boolean(siteConfig.tianyiMountPath), configHint: '账号在"运行时配置"的 TIANYI_USERNAME / TIANYI_PASSWORD' },
+  { key: 'onedrive', name: 'OneDrive', mount: siteConfig.onedriveMountPath, enabled: Boolean(siteConfig.onedriveMountPath), configHint: '凭据在"运行时配置"的 CLIENT_ID / CLIENT_SECRET，授权后自动续期' },
+  { key: 'p123', name: '123云盘', mount: siteConfig.pan123MountPath, enabled: Boolean(siteConfig.pan123MountPath), configHint: '账号在"运行时配置"的 P123_USERNAME / P123_PASSWORD' },
 ]
 
 export default function AdminManagePage({
@@ -390,8 +406,62 @@ export default function AdminManagePage({
                     <dt className="text-slate-500">上次访问</dt><dd className="font-mono tabular-nums text-slate-900">{initialSession ? new Date(initialSession.lastAccessAt).toLocaleString('zh-CN') : '-'}</dd>
                     <dt className="text-slate-500">天翼云挂载</dt><dd><code className="text-slate-900">{siteConfig.tianyiMountPath || '未启用'}</code></dd>
                     <dt className="text-slate-500">OneDrive 挂载</dt><dd><code className="text-slate-900">{siteConfig.onedriveMountPath || '未启用'}</code></dd>
+                    <dt className="text-slate-500">123云盘挂载</dt><dd><code className="text-slate-900">{siteConfig.pan123MountPath || '未启用'}</code></dd>
                     <dt className="text-slate-500">构建版本</dt><dd className="font-mono text-xs text-slate-700">{process.env.NEXT_PUBLIC_GIT_COMMIT_HASH || 'unknown'} · {process.env.NEXT_PUBLIC_BUILD_DATE || 'unknown'}</dd>
                   </dl>
+                </section>
+              </div>
+            )}
+
+            {section === 'storages' && (
+              <div className="max-w-3xl">
+                <section className="pb-7">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">网盘存储</h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-500">各网盘的挂载与连接状态。测试会实际调用对应网盘接口校验凭据。</p>
+                    </div>
+                    <button type="button" onClick={testConnections} disabled={loading} className="inline-flex min-h-[40px] items-center gap-2 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      <FontAwesomeIcon icon={faPlug} /> 测试全部连接
+                    </button>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {DRIVE_CARDS.map(card => {
+                      const test = connectionTests?.[card.key === 'tianyi' ? 'tianyi' : card.key]
+                      const statusColor = !card.enabled
+                        ? 'bg-slate-300'
+                        : test
+                          ? (test.ok ? 'bg-emerald-500' : 'bg-red-500')
+                          : 'bg-amber-400'
+                      const statusText = !card.enabled ? '未启用' : test ? (test.ok ? '连接正常' : '连接异常') : '未测试'
+                      return (
+                        <div key={card.key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-slate-950">{card.name}</h3>
+                            <span className={`h-2.5 w-2.5 rounded-full ${statusColor}`} title={statusText} />
+                          </div>
+                          <dl className="mt-3 space-y-1.5 text-xs">
+                            <div className="flex justify-between gap-2"><dt className="text-slate-500">挂载路径</dt><dd><code className="text-slate-900">{card.mount || '-'}</code></dd></div>
+                            <div className="flex justify-between gap-2"><dt className="text-slate-500">状态</dt><dd className={`font-medium ${!card.enabled ? 'text-slate-400' : test ? (test.ok ? 'text-emerald-700' : 'text-red-600') : 'text-amber-600'}`}>{statusText}</dd></div>
+                          </dl>
+                          {test && !test.ok && card.enabled && <p className="mt-2 rounded bg-red-50 px-2 py-1 text-[11px] leading-4 text-red-700">{test.message}</p>}
+                          {!test && card.enabled && <p className="mt-2 text-[11px] leading-4 text-slate-400">{card.configHint}</p>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {connectionTests && (
+                    <div className="mt-5 space-y-1.5 text-sm">
+                      {(Object.entries(connectionTests) as Array<[string, any]>).map(([key, item]: [string, any]) => (
+                        <div key={key} className={`flex items-center gap-2 ${item.ok ? 'text-emerald-700' : 'text-red-700'}`}>
+                          <FontAwesomeIcon icon={item.ok ? faCheck : faXmark} className="text-xs" />
+                          <span className="font-medium">{key}</span>
+                          <span className="text-slate-600">{item.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               </div>
             )}

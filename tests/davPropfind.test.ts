@@ -10,7 +10,7 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
 
-import { buildPropfindXml, listingErrorStatus, parseDavDepth, parseDavPath } from '../src/pages/api/dav/[[...path]].ts'
+import { buildPropfindXml, listingErrorStatus, parseDavDepth, parseDavPath } from '../src/pages/api/dav/[[...path]]'
 
 test('parseDavPath resolves the encoded Chinese drive name', () => {
   assert.deepEqual(parseDavPath(['%E5%A4%A9%E7%BF%BC%E4%BA%91%E7%9B%98', 'docs']), {

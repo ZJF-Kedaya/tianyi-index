@@ -10,6 +10,7 @@
 export const DAV_DRIVES = [
   { name: '天翼云盘', id: 'ty' },
   { name: 'OneDrive', id: 'od' },
+  { name: '123云盘', id: 'p123' },
 ] as const
 
 export type DavDriveId = (typeof DAV_DRIVES)[number]['id'] | 'root'

@@ -18,11 +18,14 @@ import { getStoredToken, Drive } from '../utils/protectedRouteHandler'
 import {
   resolveDrive,
   ONEDRIVE_ENABLED,
+  P123_ENABLED,
   VIRTUAL_ADMIN_FOLDER_ID,
   VIRTUAL_TIANYI_FOLDER_ID,
   VIRTUAL_ONEDRIVE_FOLDER_ID,
+  VIRTUAL_P123_FOLDER_ID,
   ADMIN_TY_FOLDER_NAME,
   ADMIN_OD_FOLDER_NAME,
+  ADMIN_P123_FOLDER_NAME,
 } from '../utils/driveResolver'
 import siteConfig from '../../config/site.config'
 import { useIsAdmin } from '../utils/useIsAdmin'
@@ -37,6 +40,7 @@ import { layouts } from './SwitchLayout'
 import { LoadingIcon } from './Loading'
 import FourOhFour from './FourOhFour'
 import Auth from './Auth'
+import UploadButton from './UploadButton'
 import TextPreview from './previews/TextPreview'
 import MarkdownPreview from './previews/MarkdownPreview'
 import CodePreview from './previews/CodePreview'
@@ -98,6 +102,16 @@ function virtualAdminData(): any[] {
     children.push({
       id: VIRTUAL_ONEDRIVE_FOLDER_ID,
       name: ADMIN_OD_FOLDER_NAME,
+      size: 0,
+      lastModifiedDateTime: new Date().toISOString(),
+      folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
+    })
+  }
+
+  if (P123_ENABLED) {
+    children.push({
+      id: VIRTUAL_P123_FOLDER_ID,
+      name: ADMIN_P123_FOLDER_NAME,
       size: 0,
       lastModifiedDateTime: new Date().toISOString(),
       folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
@@ -211,7 +225,7 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
   const resolved = resolveDrive(router.asPath)
   const { apiBase, relPath, drive } = resolved
   // 虚拟根目录的 apiBase 是 '/api/ty'（虚拟根不实际请求，但用真实 API base 防竞态）
-  const apiBaseTyped = apiBase as '/api/ty' | '/api/od'
+  const apiBaseTyped = apiBase as '/api/ty' | '/api/od' | '/api/p123'
   // 虚拟根目录不会触发认证/下载，统一转成 'ty' 兼容 Drive 类型
   const normalizedDrive: Drive = drive === 'virtual' ? 'ty' : drive
 
@@ -371,6 +385,19 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
           virtualFolders.push({
             id: VIRTUAL_ONEDRIVE_FOLDER_ID,
             name: odFolderName,
+            size: 0,
+            lastModifiedDateTime: new Date().toISOString(),
+            folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
+          })
+        }
+      }
+      // 注入 123 云盘入口（无论是否登录）
+      if (P123_ENABLED) {
+        const p123FolderName = siteConfig.pan123MountPath.split('/').pop() || ADMIN_P123_FOLDER_NAME
+        if (!folderChildren.some(c => c.name === p123FolderName)) {
+          virtualFolders.push({
+            id: VIRTUAL_P123_FOLDER_ID,
+            name: p123FolderName,
             size: 0,
             lastModifiedDateTime: new Date().toISOString(),
             folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
@@ -544,6 +571,13 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
   return (
     <>
       <Toaster />
+
+      {/* 上传入口（管理员 + 支持上传的云盘可见） */}
+      {!isVirtualAdmin && (
+        <div className="mb-2 flex justify-end">
+          <UploadButton dirPath={backendPath} drive={normalizedDrive} />
+        </div>
+      )}
 
       {/* 文件列表容器：带展开动画（和 MarkdownPreview 一样的状态机）
           - loading：显示 Loading 文字（py-16，自带毛玻璃）

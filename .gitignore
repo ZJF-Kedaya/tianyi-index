@@ -50,3 +50,4 @@ dump.rdb
 # diagnostic
 diag-*.js
 od-403-diagnostic-*.log
+.zcode/

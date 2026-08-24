@@ -18,6 +18,8 @@ export const RUNTIME_CONFIG_KEYS = [
   'NEXT_PUBLIC_EMAIL',
   'PROTECTED_TOKEN_SECRET',
   'WEBDAV_WORKER_SECRET',
+  'P123_USERNAME',
+  'P123_PASSWORD',
 ] as const
 
 export type RuntimeConfigKey = (typeof RUNTIME_CONFIG_KEYS)[number]
@@ -29,6 +31,8 @@ const SENSITIVE_KEYS = new Set<RuntimeConfigKey>([
   'CLIENT_SECRET',
   'PROTECTED_TOKEN_SECRET',
   'WEBDAV_WORKER_SECRET',
+  'P123_USERNAME',
+  'P123_PASSWORD',
 ])
 
 let redis: Redis | null = null
@@ -224,9 +228,33 @@ export async function testRuntimeConfigConnections() {
   const clientId = await getRuntimeConfigValue('CLIENT_ID')
   const clientSecret = await getRuntimeConfigValue('CLIENT_SECRET')
   if (clientId && clientSecret) {
-    results.onedrive = { ok: true, message: 'OneDrive 凭据已配置（未执行 OAuth 令牌交换测试）' }
+    // 有凭据时做一次真实校验：能否拿到 access token 并访问 drive 根
+    try {
+      const { getAccessToken } = await import('../pages/api/od/index')
+      const accessToken = await getAccessToken()
+      if (!accessToken) {
+        results.onedrive = { ok: false, message: 'OneDrive 未授权或 token 刷新失败' }
+      } else {
+        results.onedrive = { ok: true, message: 'OneDrive 连接正常（token 有效）' }
+      }
+    } catch (error: any) {
+      results.onedrive = { ok: false, message: error?.message || 'OneDrive 连接失败' }
+    }
   } else {
     results.onedrive = { ok: false, message: '未配置 OneDrive 凭据' }
+  }
+
+  const p123Username = await getRuntimeConfigValue('P123_USERNAME')
+  const p123Password = await getRuntimeConfigValue('P123_PASSWORD')
+  if (p123Username && p123Password) {
+    try {
+      const { testPan123Connection } = await import('./pan123Client')
+      results.p123 = await testPan123Connection()
+    } catch (error: any) {
+      results.p123 = { ok: false, message: error?.message || '123 云盘连接异常' }
+    }
+  } else {
+    results.p123 = { ok: false, message: '未配置 123 云盘账号' }
   }
 
   return results

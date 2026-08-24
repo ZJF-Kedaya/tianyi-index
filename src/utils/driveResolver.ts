@@ -18,11 +18,11 @@
 
 import siteConfig from '../../config/site.config'
 
-export type DriveType = 'ty' | 'od' | 'virtual'
+export type DriveType = 'ty' | 'od' | 'p123' | 'virtual'
 
 export interface DriveResolution {
   drive: DriveType
-  apiBase: '/api/ty' | '/api/od'
+  apiBase: '/api/ty' | '/api/od' | '/api/p123'
   /** 剥离挂载前缀后的相对路径，始终以 / 开头，传给后端 API 的 path 参数 */
   relPath: string
   /** 当前云盘的挂载前缀，如 '/' 或 '/OneDrive' */
@@ -33,16 +33,19 @@ export interface DriveResolution {
 
 const TY_MOUNT = siteConfig.tianyiMountPath // '/' 或 '/xxx'
 const OD_MOUNT = siteConfig.onedriveMountPath // '/OneDrive' 或 '' 或 '/xxx'
+const P123_MOUNT = siteConfig.pan123MountPath // '/123云盘' 或 ''
 
 /**
  * 管理员登录后的虚拟管理路径。
- * /Admin 下显示天翼云盘和 OneDrive 两个入口文件夹。
+ * /Admin 下显示各网盘的入口文件夹。
  */
 export const ADMIN_MOUNT = '/Admin'
 export const ADMIN_TY_FOLDER_NAME = '天翼云盘'
 export const ADMIN_OD_FOLDER_NAME = 'OneDrive'
+export const ADMIN_P123_FOLDER_NAME = '123云盘'
 export const ADMIN_TY_MOUNT = `${ADMIN_MOUNT}/${ADMIN_TY_FOLDER_NAME}`
 export const ADMIN_OD_MOUNT = `${ADMIN_MOUNT}/${ADMIN_OD_FOLDER_NAME}`
+export const ADMIN_P123_MOUNT = `${ADMIN_MOUNT}/${ADMIN_P123_FOLDER_NAME}`
 
 /**
  * 读取全局管理员状态（由 useIsAdmin hook 设置）
@@ -106,8 +109,14 @@ export function resolveDrive(urlPath: string): DriveResolution {
 
   // === 管理员虚拟路径（登录后生效，必须在天翼云默认匹配之前） ===
 
-  // /Admin → virtual（显示两个云盘入口文件夹）
-  if (isAdmin && pathStartsWithMount(cleanPath, ADMIN_MOUNT) && !pathStartsWithMount(cleanPath, ADMIN_TY_MOUNT) && !pathStartsWithMount(cleanPath, ADMIN_OD_MOUNT)) {
+  // /Admin → virtual（显示各云盘入口文件夹）
+  if (
+    isAdmin &&
+    pathStartsWithMount(cleanPath, ADMIN_MOUNT) &&
+    !pathStartsWithMount(cleanPath, ADMIN_TY_MOUNT) &&
+    !pathStartsWithMount(cleanPath, ADMIN_OD_MOUNT) &&
+    !pathStartsWithMount(cleanPath, ADMIN_P123_MOUNT)
+  ) {
     return {
       drive: 'virtual',
       apiBase: '/api/ty',
@@ -141,9 +150,21 @@ export function resolveDrive(urlPath: string): DriveResolution {
     }
   }
 
+  // /Admin/123云盘/... → p123
+  if (isAdmin && pathStartsWithMount(cleanPath, ADMIN_P123_MOUNT)) {
+    const relPath = stripMount(cleanPath, ADMIN_P123_MOUNT)
+    return {
+      drive: 'p123',
+      apiBase: '/api/p123',
+      relPath,
+      mountPath: ADMIN_P123_MOUNT,
+      admin: true,
+    }
+  }
+
   // === 原有云盘挂载点匹配 ===
 
-  // 优先匹配 OneDrive（因为天翼云通常在根目录，会兜底）
+  // OneDrive 挂载点
   if (OD_MOUNT && pathStartsWithMount(cleanPath, OD_MOUNT)) {
     const relPath = stripMount(cleanPath, OD_MOUNT)
     return {
@@ -151,6 +172,18 @@ export function resolveDrive(urlPath: string): DriveResolution {
       apiBase: '/api/od',
       relPath,
       mountPath: OD_MOUNT,
+      admin: false,
+    }
+  }
+
+  // 123 云盘挂载点（在天翼云兜底之前）
+  if (P123_MOUNT && pathStartsWithMount(cleanPath, P123_MOUNT)) {
+    const relPath = stripMount(cleanPath, P123_MOUNT)
+    return {
+      drive: 'p123',
+      apiBase: '/api/p123',
+      relPath,
+      mountPath: P123_MOUNT,
       admin: false,
     }
   }
@@ -170,14 +203,14 @@ export function resolveDrive(urlPath: string): DriveResolution {
  * 将 DriveType 归一化为 Drive（'virtual' → 'ty'）。
  * 虚拟目录没有私密目录，统一按 'ty' 处理即可。
  */
-export function normalizeDrive(drive: DriveType): 'ty' | 'od' {
+export function normalizeDrive(drive: DriveType): 'ty' | 'od' | 'p123' {
   return drive === 'virtual' ? 'ty' : drive
 }
 
 /**
  * 便捷：只获取 apiBase
  */
-export function getApiBase(urlPath: string): '/api/ty' | '/api/od' {
+export function getApiBase(urlPath: string): '/api/ty' | '/api/od' | '/api/p123' {
   return resolveDrive(urlPath).apiBase
 }
 
@@ -194,6 +227,11 @@ export function isOnedrivePath(urlPath: string): boolean {
 export const ONEDRIVE_ENABLED = Boolean(OD_MOUNT)
 
 /**
+ * 123 云盘挂载是否启用
+ */
+export const P123_ENABLED = Boolean(P123_MOUNT)
+
+/**
  * 虚拟文件夹入口的唯一 id。
  * 布局组件通过这些 id 识别虚拟文件夹，跳过下载/复制等后端操作。
  */
@@ -203,3 +241,5 @@ export const VIRTUAL_ADMIN_FOLDER_ID = '__virtual_admin__'
 export const VIRTUAL_TIANYI_FOLDER_ID = '__virtual_tianyi__'
 // /Admin 下的 OneDrive 入口
 export const VIRTUAL_ONEDRIVE_FOLDER_ID = '__virtual_onedrive__'
+// /Admin 下的 123 云盘入口
+export const VIRTUAL_P123_FOLDER_ID = '__virtual_p123__'

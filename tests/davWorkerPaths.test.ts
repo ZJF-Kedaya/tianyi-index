@@ -9,7 +9,7 @@ import { strict as assert } from 'node:assert'
 import test from 'node:test'
 
 async function loadWorkerPaths() {
-  const mod: any = await import('../workers/webdav/src/index.ts')
+  const mod: any = await import('../workers/webdav/src/index')
   // tsx 把 ESM 转 CJS 后，命名导出挂在 module.exports 上，default 另有其物
   const source = typeof mod.davPathFromUpstreamPathname === 'function' ? mod : (mod.default ?? mod)
   return { davPathFromUpstreamPathname: source.davPathFromUpstreamPathname, externalFromDavPath: source.externalFromDavPath }

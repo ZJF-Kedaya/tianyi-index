@@ -10,7 +10,7 @@ import { getBaseUrl } from '../utils/getBaseUrl'
 import { formatModifiedDateTime } from '../utils/fileDetails'
 import { Checkbox, ChildIcon, ChildName, Downloading } from './FileListing'
 import { getStoredToken, Drive } from '../utils/protectedRouteHandler'
-import { VIRTUAL_ADMIN_FOLDER_ID, VIRTUAL_ONEDRIVE_FOLDER_ID, VIRTUAL_TIANYI_FOLDER_ID } from '../utils/driveResolver'
+import { VIRTUAL_ADMIN_FOLDER_ID, VIRTUAL_ONEDRIVE_FOLDER_ID, VIRTUAL_TIANYI_FOLDER_ID, VIRTUAL_P123_FOLDER_ID } from '../utils/driveResolver'
 
 const GridItem = ({
   c,
@@ -33,7 +33,7 @@ const GridItem = ({
 
   // 虚拟入口（Admin / 天翼云盘 / OneDrive）不显示子项数量
   const isVirtualFolder =
-    c.id === VIRTUAL_ONEDRIVE_FOLDER_ID || c.id === VIRTUAL_TIANYI_FOLDER_ID || c.id === VIRTUAL_ADMIN_FOLDER_ID
+    c.id === VIRTUAL_ONEDRIVE_FOLDER_ID || c.id === VIRTUAL_TIANYI_FOLDER_ID || c.id === VIRTUAL_P123_FOLDER_ID || c.id === VIRTUAL_ADMIN_FOLDER_ID
   // 子项数量：仅文件夹有值，文件为 undefined 不渲染角标
   const childCount = c.folder ? c.folder.childCount : undefined
 
@@ -144,7 +144,7 @@ const FolderGridLayout = ({
           >
             <div className="absolute top-0 right-0 z-10 m-1 rounded bg-white/50 py-0.5 opacity-0 transition-all duration-100 group-hover:opacity-100 dark:bg-gray-900/50">
               {c.folder ? (
-                c.id === VIRTUAL_ONEDRIVE_FOLDER_ID || c.id === VIRTUAL_TIANYI_FOLDER_ID || c.id === VIRTUAL_ADMIN_FOLDER_ID ? null : (
+                c.id === VIRTUAL_ONEDRIVE_FOLDER_ID || c.id === VIRTUAL_TIANYI_FOLDER_ID || c.id === VIRTUAL_P123_FOLDER_ID || c.id === VIRTUAL_ADMIN_FOLDER_ID ? null : (
                   <div>
                     <span
                       title={t('Copy folder permalink')}

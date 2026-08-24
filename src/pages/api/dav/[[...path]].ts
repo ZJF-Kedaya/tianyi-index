@@ -6,6 +6,11 @@ import { getAccessToken, graphGet } from '../od/index'
 import { getFiles, getDownloadLink } from '../../../utils/tianyiClient'
 import { getOrCreateTianyiSession } from '../../../utils/tianyiSession'
 import { resolveTianyiPath } from '../../../utils/tianyiPath'
+import {
+  getPan123DownloadLink,
+  listPan123Folder,
+  resolvePan123Path,
+} from '../../../utils/pan123Client'
 import { getMimeType } from '../../../utils/mime'
 import { constantTimeEqual } from '../../../utils/constantTimeEqual'
 import { checkRateLimit } from '../../../utils/rateLimit'
@@ -389,6 +394,65 @@ async function getOdDirListing(
 }
 
 /**
+ * 123 云盘目录列举（PROPFIND）。路径语义与天翼分支一致：
+ * 文件路径返回自身单条资源，目录路径返回自身 + 子项。
+ */
+async function getP123DirListing(
+  p123Path: string,
+): Promise<{ self: DavResource | null; resources: DavResource[] } | DavListingError> {
+  const segments = p123Path.split('/').filter(Boolean)
+  try {
+    const resolved = await resolvePan123Path(segments)
+    if (resolved.kind === 'not_found') {
+      return { error: '路径未找到', kind: 'not_found' }
+    }
+
+    const baseHref = urlEncodePath(`/123云盘/${segments.join('/')}`)
+
+    if (resolved.kind === 'file') {
+      const m = resolved.meta
+      return {
+        self: {
+          href: baseHref,
+          displayName: m.FileName,
+          isCollection: false,
+          contentLength: m.Size || 0,
+          contentType: getMimeType(m.FileName),
+          lastModified: formatHttpDate(m.UpdateAt),
+        },
+        resources: [],
+      }
+    }
+
+    const children = await listPan123Folder(resolved.id)
+    const self: DavResource = {
+      href: baseHref.endsWith('/') ? baseHref : baseHref + '/',
+      displayName: segments.length > 0 ? segments[segments.length - 1] : '123云盘',
+      isCollection: true,
+      contentType: 'httpd/unix-directory',
+      lastModified: formatHttpDate(''),
+    }
+    const resources: DavResource[] = []
+    for (const child of children) {
+      const isCol = child.Type === 1
+      resources.push({
+        href: `${baseHref.endsWith('/') ? baseHref : baseHref + '/'}${urlEncodePath(child.FileName)}${isCol ? '/' : ''}`,
+        displayName: child.FileName,
+        isCollection: isCol,
+        contentLength: isCol ? undefined : (child.Size || 0),
+        contentType: isCol ? 'httpd/unix-directory' : getMimeType(child.FileName),
+        lastModified: formatHttpDate(child.UpdateAt),
+      })
+    }
+    return { self, resources }
+  } catch (error: any) {
+    console.error('[dav] p123 listing error:', error?.message)
+    // 凭据缺失/上游故障都是临时性问题，返回 502 防止客户端把网盘当不存在
+    return { error: String(error?.message || '获取目录失败'), kind: 'transient' }
+  }
+}
+
+/**
  * WebDAV 虚拟根目录：由云盘注册表（DAV_DRIVES）生成入口列表。
  * 对外命名空间以 / 为根：/天翼云盘/*、/OneDrive/*，
  * /dav/* 只是 Worker 内部映射空间与兼容别名，不再出现在任何 href 里。
@@ -470,6 +534,14 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
       }
       self = result.self
       resources = result.resources
+    } else if (davPath.drive === 'p123') {
+      const result = await getP123DirListing(davPath.subPath)
+      if ('error' in result) {
+        sendListingError(res, req.url, listingErrorStatus(result.kind))
+        return
+      }
+      self = result.self
+      resources = result.resources
     }
 
     const bodyResources = depth === 0 ? (self ? [self] : []) : self ? [self, ...resources] : resources
@@ -535,6 +607,19 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, davPath: Par
       } else {
         res.status(404).json({ error: 'No download url found' })
       }
+    } else if (davPath.drive === 'p123') {
+      const segments = davPath.subPath.split('/').filter(Boolean)
+      if (segments.length === 0) {
+        res.status(400).json({ error: 'Cannot download a folder' })
+        return
+      }
+      const resolved = await resolvePan123Path(segments)
+      if (resolved.kind !== 'file') {
+        res.status(404).json({ error: '文件未找到' })
+        return
+      }
+      const link = await getPan123DownloadLink(resolved.meta)
+      res.redirect(302, link)
     }
   } catch (e: any) {
     console.error('[dav] GET error:', e?.message)

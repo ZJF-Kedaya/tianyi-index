@@ -31,6 +31,11 @@ module.exports = {
   // 设为空字符串则不启用 OneDrive 挂载
   onedriveMountPath: normalizeMountPath(process.env.NEXT_PUBLIC_ONEDRIVE_MOUNT_PATH || '/OneDrive'),
 
+  // 123 云盘挂载到网站的哪个路径（默认 /123云盘）
+  // 环境变量 NEXT_PUBLIC_123_MOUNT_PATH 优先（需 NEXT_PUBLIC_ 前缀，前端要读取）
+  // 设为空字符串则不启用 123 云盘挂载
+  pan123MountPath: normalizeMountPath(process.env.NEXT_PUBLIC_123_MOUNT_PATH || '/123云盘'),
+
   // === 受密码保护的路径（在天翼云/OneDrive 对应目录下放 .password 文件，内容为访问密码）===
   // 天翼云侧私密目录：环境变量 NEXT_PUBLIC_PROTECTED_ROUTES 优先，逗号分隔
   // 路径是相对于天翼云挂载点内部的路径（不含挂载前缀）
