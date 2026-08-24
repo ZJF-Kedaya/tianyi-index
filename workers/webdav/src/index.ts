@@ -5,6 +5,7 @@ interface Env {
 const ORIGIN = 'https://pan.xiegao.top'
 const FORWARDED_HEADERS = [
   'accept',
+  'authorization',
   'content-type',
   'depth',
   'if',
