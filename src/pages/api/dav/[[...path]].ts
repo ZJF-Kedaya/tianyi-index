@@ -12,6 +12,7 @@ import { constantTimeEqual } from '../../../utils/constantTimeEqual'
 import { checkRateLimit } from '../../../utils/rateLimit'
 import { getClientIp } from '../../../utils/getClientIp'
 import { DAV_DRIVES, getDavDriveByName } from '../../../utils/driveRegistry'
+import { safeDecodeURIComponent } from '../../../utils/decode'
 import apiConfig from '../../../../config/api.config'
 import { getRuntimeConfigValue } from '../../../utils/runtimeConfigStore'
 
@@ -82,10 +83,7 @@ function buildPropfindXml(resources: DavResource[]): string {
     '<multistatus xmlns="DAV:">',
   ]
   for (const r of resources) {
-    // encodeURI 将中文等非 ASCII 字符转为 UTF-8 百分号编码，同时保留已编码的
-    // href（不触碰 % 和 /），避免 xmlEscape 将中文转成 XML 数字字符引用导致
-    // WebDAV 客户端拿到乱码链接、无法导航到子目录。
-    const escapedHref = xmlEscape(encodeURI(r.href))
+    const escapedHref = xmlEscape(r.href)
     const escapedDisplayName = xmlEscape(r.displayName)
     const escapedContentType = xmlEscape(r.contentType || (r.isCollection ? 'httpd/unix-directory' : 'application/octet-stream'))
     const escapedLastMod = xmlEscape(r.lastModified)
@@ -122,10 +120,11 @@ function parseDavPath(segments: string[]): ParsedDavPath | null {
   if (segments.length === 0 || (segments.length === 1 && segments[0] === '')) {
     return { drive: 'root', subPath: '/' }
   }
-  const driveName = segments[0]
-  const rest = segments.slice(1).filter(Boolean)
+  // URL 解码路径段：Worker 转发的路径可能是编码后的（含 %XX），
+  // 而 DAV_DRIVES 注册名为中文原文，解码后才能正确匹配。
+  const driveName = safeDecodeURIComponent(segments[0])
+  const rest = segments.slice(1).filter(Boolean).map(s => safeDecodeURIComponent(s))
   const subPath = '/' + rest.join('/')
-  // 云盘注册表驱动：新增网盘只需在 driveRegistry.ts 注册 + 下方实现 listing/get 逻辑
   const drive = getDavDriveByName(driveName)
   if (!drive) return null
   return { drive: drive.id, subPath }
@@ -405,7 +404,7 @@ async function getVirtualRootResources(): Promise<{ resources: DavResource[] }> 
   const resources: DavResource[] = []
   for (const drive of DAV_DRIVES) {
     resources.push({
-      href: `/dav/${encodeURIComponent(drive.name)}/`,
+      href: `/dav/${drive.name}/`,
       displayName: drive.name,
       isCollection: true,
       contentType: 'httpd/unix-directory',
