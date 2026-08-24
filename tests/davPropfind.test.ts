@@ -45,28 +45,28 @@ test('only genuine not-found maps to 404; backend faults must be 5xx', () => {
 
 test('PROPFIND XML includes the request resource itself before children', () => {
   const self = {
-    href: '/dav/OneDrive/',
-    displayName: 'OneDrive',
+    href: '/',
+    displayName: '.',
     isCollection: true,
     contentType: 'httpd/unix-directory',
     lastModified: 'Mon, 01 Jan 2024 00:00:00 GMT',
   }
   const child = {
-    href: '/dav/OneDrive/docs/',
-    displayName: 'docs',
+    href: '/OneDrive/',
+    displayName: 'OneDrive',
     isCollection: true,
     contentType: 'httpd/unix-directory',
     lastModified: 'Mon, 01 Jan 2024 00:00:00 GMT',
   }
   const xml = buildPropfindXml([self, child])
   const hrefs = [...xml.matchAll(/<href>([^<]+)<\/href>/g)].map(m => m[1])
-  assert.deepEqual(hrefs, ['/dav/OneDrive/', '/dav/OneDrive/docs/'])
+  assert.deepEqual(hrefs, ['/', '/OneDrive/'])
   assert.ok(xml.includes('<collection/>'))
 })
 
 test('PROPFIND XML omits missing optional props instead of emitting blank lines', () => {
   const resource = {
-    href: '/dav/%E5%A4%A9%E7%BF%BC%E4%BA%91%E7%9B%98/',
+    href: '/%E5%A4%A9%E7%BF%BC%E4%BA%91%E7%9B%98/',
     displayName: '天翼云盘',
     isCollection: true,
     contentType: 'httpd/unix-directory',

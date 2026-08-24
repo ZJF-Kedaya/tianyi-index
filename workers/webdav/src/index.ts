@@ -119,6 +119,17 @@ function davPathFromUpstreamPathname(pathname: string): string | null {
   return null
 }
 
+/**
+ * 把内部 dav 空间路径转成对客户端暴露的形式。
+ * 对外命名空间以 / 为根（/天翼云盘/*、/OneDrive/*），
+ * /dav 只是 Worker 内部映射前缀，绝不能出现在返回给客户端的 URL 里。
+ * 例如 /dav/OneDrive/ -> /OneDrive/，/dav/ -> /
+ */
+function externalFromDavPath(davPath: string): string {
+  if (davPath === '/dav' || davPath === '/dav/') return '/'
+  return davPath.slice('/dav'.length)
+}
+
 function getOriginUrl(origin: string, davPath: string, search: string): URL {
   const davPrefix = '/dav'
   const suffix = davPath === davPrefix ? '/' : davPath.slice(davPrefix.length)
@@ -197,15 +208,15 @@ export default {
     responseHeaders.set('Cache-Control', 'no-store')
     responseHeaders.delete('Set-Cookie')
 
-    // 兜底：仍有未跟随的 3xx 时，把 Location 改写回 Worker 的路径空间，
-    // 绝不把源站域名泄漏给客户端
+    // 兜底：仍有未跟随的 3xx 时，把 Location 改写成对外的根命名空间形式
+    // （不带 /dav 内部前缀），且绝不把源站域名泄漏给客户端
     if (isRedirect(upstream.status) && responseHeaders.has('location')) {
       try {
         const location = responseHeaders.get('location') as string
         const next = new URL(location, getOriginUrl(origin, currentDavPath, currentSearch))
         const mapped = next.origin === origin ? davPathFromUpstreamPathname(next.pathname) : null
         if (mapped) {
-          responseHeaders.set('location', `${mapped}${next.search}`)
+          responseHeaders.set('location', `${externalFromDavPath(mapped)}${next.search}`)
         } else {
           responseHeaders.delete('location')
         }

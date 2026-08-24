@@ -244,7 +244,9 @@ async function getTyDirListing(
   }
 
   const tyDavName = getDavDriveByName('ty')?.name || '天翼云盘'
-  const baseHref = urlEncodePath(`/dav/${tyDavName}/` + segments.join('/'))
+  // 对外 href 不带 /dav 前缀：Worker 把 /天翼云盘/* 直接映射到内部 /api/dav/*，
+  // 双前缀会让"按 href 走"和"按当前路径拼文件名"两类客户端解析出不同结果
+  const baseHref = urlEncodePath(`/${tyDavName}/` + segments.join('/'))
 
   // 文件路径：返回单条文件资源（即自身）
   if (result.fileMeta) {
@@ -328,7 +330,7 @@ async function getOdDirListing(
     // 请求路径自身的资源（RFC 4918：PROPFIND 响应必须包含请求资源）
     if (!('folder' in identityData)) {
       const fileResource: DavResource = {
-        href: urlEncodePath(`/dav/OneDrive${cleanPath}`),
+        href: urlEncodePath(`/OneDrive${cleanPath}`),
         displayName: identityData.name || 'unknown',
         isCollection: false,
         contentLength: identityData.size || 0,
@@ -338,7 +340,7 @@ async function getOdDirListing(
       return { self: fileResource, resources: [] }
     }
 
-    const selfHref = urlEncodePath(`/dav/OneDrive${cleanPath}`) + (cleanPath === '/' ? '' : '/')
+    const selfHref = urlEncodePath(`/OneDrive${cleanPath}`) + (cleanPath === '/' ? '' : '/')
     const self: DavResource = {
       href: selfHref,
       displayName: cleanPath === '/' ? 'OneDrive' : identityData.name || 'OneDrive',
@@ -388,8 +390,8 @@ async function getOdDirListing(
 
 /**
  * WebDAV 虚拟根目录：由云盘注册表（DAV_DRIVES）生成入口列表。
- * 注意：不包含 /dav/ 自身作为可浏览资源——它只是路径前缀，
- * 若将其列为一个文件夹，部分 WebDAV 客户端会将其当作空网盘挂载。
+ * 对外命名空间以 / 为根：/天翼云盘/*、/OneDrive/*，
+ * /dav/* 只是 Worker 内部映射空间与兼容别名，不再出现在任何 href 里。
  */
 async function getVirtualRootResources(): Promise<{ resources: DavResource[] }> {
   const resources: DavResource[] = []
@@ -397,7 +399,7 @@ async function getVirtualRootResources(): Promise<{ resources: DavResource[] }> 
     // href 统一百分号编码：中文盘名若以原始 UTF-8 出现在 href 里，
     // 部分客户端构造子请求时会处理失败
     resources.push({
-      href: urlEncodePath(`/dav/${drive.name}/`),
+      href: urlEncodePath(`/${drive.name}/`),
       displayName: drive.name,
       isCollection: true,
       contentType: 'httpd/unix-directory',
@@ -412,7 +414,7 @@ function sendListingError(res: NextApiResponse, requestUrl: string | undefined, 
   res.status(status).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
     buildPropfindXml([
       {
-        href: requestUrl || '/dav/',
+        href: requestUrl || '/',
         displayName: 'Error',
         isCollection: true,
         lastModified: formatHttpDate(''),
@@ -430,11 +432,11 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
 
     if (davPath.drive === 'root') {
       // RFC 4918 §9.1：Depth 0/1 响应都必须包含请求资源自身。
-      // 缺少自身条目会让部分客户端（Windows 重定向器等）挂载层级异常，
-      // 也是"有的软件只显示一个网盘"的诱因之一。
+      // 缺少自身条目会让部分客户端（Windows 重定向器等）挂载层级异常。
+      // displayName 用 '.' 表示"本目录"，避免客户端把它渲染成多余的可点文件夹
       self = {
-        href: urlEncodePath('/dav/'),
-        displayName: 'dav',
+        href: '/',
+        displayName: '.',
         isCollection: true,
         contentType: 'httpd/unix-directory',
         lastModified: formatHttpDate(''),
