@@ -198,11 +198,7 @@ async function authenticate(req: NextApiRequest, pathSegments: string[]): Promis
  * 天翼云目录列举（PROPFIND）。
  * 基于公共 resolveTianyiPath：文件路径返回单条资源，目录路径返回子项列表。
  */
-async function getTyDirListing(
-  tyPath: string,
-  cookies: Record<string, string>,
-  depth: string = '1',
-): Promise<{ resources: DavResource[] } | { error: string }> {
+async function getTyDirListing(tyPath: string, cookies: Record<string, string>): Promise<{ resources: DavResource[] } | { error: string }> {
   const segments = tyPath.split('/').filter(Boolean)
   const username = await getTyRuntimeUsername()
   const password = await getTyRuntimePassword()
@@ -220,7 +216,7 @@ async function getTyDirListing(
 
   // 文件路径：返回单条文件资源
   if (result.fileMeta) {
-    const requestedHref = `/dav/${tyDavName}/` + segments.join('/')
+    const requestedHref = urlEncodePath(`/dav/${tyDavName}/` + segments.join('/'))
     const resources: DavResource[] = [
       {
         href: requestedHref,
@@ -234,45 +230,18 @@ async function getTyDirListing(
     return { resources }
   }
 
-  // Depth: 0 仅返回目录自身资源，不列举子项
-  if (depth === '0') {
-    const parentHref = `/dav/${tyDavName}/` + segments.join('/')
-    return {
-      resources: [
-        {
-          href: parentHref.endsWith('/') ? parentHref : parentHref + '/',
-          displayName: segments.length > 0 ? segments[segments.length - 1] : tyDavName,
-          isCollection: true,
-          contentType: 'httpd/unix-directory',
-          lastModified: 'Mon, 01 Jan 2024 00:00:00 GMT',
-        },
-      ],
-    }
-  }
-
   // 目录路径：列举子项
   const listResult = await getFiles(result.cookies, result.folderId, username, password)
   if (listResult.status !== 'success' || !listResult.data) {
     return { error: listResult.message || '获取目录失败' }
   }
 
-  const parentHref = `/dav/${tyDavName}/` + segments.join('/')
-  const parentDisplayName = segments.length > 0 ? segments[segments.length - 1] : tyDavName
+  const parentHref = urlEncodePath(`/dav/${tyDavName}/` + segments.join('/'))
 
-  const resources: DavResource[] = [
-    {
-      href: parentHref.endsWith('/') ? parentHref : parentHref + '/',
-      displayName: parentDisplayName,
-      isCollection: true,
-      contentType: 'httpd/unix-directory',
-      lastModified: 'Mon, 01 Jan 2024 00:00:00 GMT',
-    },
-  ]
+  const resources: DavResource[] = []
 
   for (const folder of listResult.data.folders) {
-    const folderHref = parentHref.endsWith('/')
-      ? parentHref + folder.name + '/'
-      : parentHref + '/' + folder.name + '/'
+    const folderHref = parentHref.endsWith('/') ? parentHref + urlEncodePath(folder.name) + '/' : parentHref + '/' + urlEncodePath(folder.name) + '/'
     resources.push({
       href: folderHref,
       displayName: folder.name,
@@ -283,9 +252,7 @@ async function getTyDirListing(
   }
 
   for (const file of listResult.data.files) {
-    const fileHref = parentHref.endsWith('/')
-      ? parentHref + file.name
-      : parentHref + '/' + file.name
+    const fileHref = parentHref.endsWith('/') ? parentHref + urlEncodePath(file.name) : parentHref + '/' + urlEncodePath(file.name)
     resources.push({
       href: fileHref,
       displayName: file.name,
@@ -299,11 +266,7 @@ async function getTyDirListing(
   return { resources }
 }
 
-async function getOdDirListing(
-  odPath: string,
-  accessToken: string,
-  depth: string = '1',
-): Promise<{ resources: DavResource[] } | { error: string }> {
+async function getOdDirListing(odPath: string, accessToken: string): Promise<{ resources: DavResource[] } | { error: string }> {
   const resolvedPath = pathPosix.resolve('/', odPath)
   const cleanPath = resolvedPath === '/' ? '/' : resolvedPath.replace(/\/$/, '')
   const isRoot = cleanPath === '/'
@@ -321,9 +284,10 @@ async function getOdDirListing(
     })
 
     if (!('folder' in identityData)) {
+      const parentHref = urlEncodePath('/dav/OneDrive/' + odPath.replace(/^\//, ''))
       const resources: DavResource[] = [
         {
-          href: `/dav/OneDrive/` + odPath.replace(/^\//, ''),
+          href: parentHref,
           displayName: identityData.name || 'unknown',
           isCollection: false,
           contentLength: identityData.size || 0,
@@ -334,32 +298,10 @@ async function getOdDirListing(
       return { resources }
     }
 
-    // Depth: 0 仅返回目录自身资源
-    if (depth === '0') {
-      return {
-        resources: [
-          {
-            href: '/dav/OneDrive/' + odPath.replace(/^\//, ''),
-            displayName: cleanPath === '/' ? 'OneDrive' : (identityData.name || 'OneDrive'),
-            isCollection: true,
-            contentType: 'httpd/unix-directory',
-            lastModified: formatHttpDate(identityData.lastModifiedDateTime),
-          },
-        ],
-      }
-    }
-
+    const parentHref = urlEncodePath('/dav/OneDrive/' + odPath.replace(/^\//, ''))
     const parentDisplayName = cleanPath === '/' ? 'OneDrive' : (identityData.name || 'OneDrive')
 
-    const resources: DavResource[] = [
-      {
-        href: '/dav/OneDrive/' + odPath.replace(/^\//, ''),
-        displayName: parentDisplayName,
-        isCollection: true,
-        contentType: 'httpd/unix-directory',
-        lastModified: formatHttpDate(identityData.lastModifiedDateTime),
-      },
-    ]
+    const resources: DavResource[] = []
 
     const childrenUrl = isRoot ? `${apiConfig.driveApi}/root/children` : `${requestUrl}:/children`
     const { data: folderData } = await axios.get(childrenUrl, {
@@ -374,8 +316,9 @@ async function getOdDirListing(
     for (const child of children) {
       const isCol = 'folder' in child
       const childName: string = child.name || 'unknown'
-      const baseHref = '/dav/OneDrive/' + odPath.replace(/^\//, '')
-      const href = isCol ? baseHref + '/' + childName + '/' : baseHref + '/' + childName
+      const childHrefEncoded = urlEncodePath(childName)
+      const baseHref = parentHref === '/dav/OneDrive/' ? '/dav/OneDrive/' : parentHref + '/'
+      const href = isCol ? baseHref + childHrefEncoded + '/' : baseHref + childHrefEncoded
       resources.push({
         href,
         displayName: childName,
@@ -415,32 +358,16 @@ async function getVirtualRootResources(): Promise<{ resources: DavResource[] }> 
 }
 
 async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath: ParsedDavPath): Promise<void> {
-  const rawDepth = req.headers.depth
-  const depth = Array.isArray(rawDepth) ? rawDepth[0] : (rawDepth || '1')
 
   try {
     let resources: DavResource[] = []
     if (davPath.drive === 'root') {
-      // 虚拟根目录只返回网盘入口，Depth 限制为 1 防止递归进每个网盘导致超时
-      if (depth === 'infinity') {
-        res.status(403).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
-          buildPropfindXml([
-            {
-              href: req.url || '/dav/',
-              displayName: 'Error',
-              isCollection: true,
-              lastModified: formatHttpDate(''),
-            },
-          ]),
-        )
-        return
-      }
       const result = await getVirtualRootResources()
       resources = result.resources
     } else if (davPath.drive === 'ty') {
       const session = await getOrCreateTianyiSession()
       if ('error' in session) {
-        res.status(502).setHeader('Content-Type', 'text/xml; charset="utf-8"').send(
+        res.status(502).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
           buildPropfindXml([
             {
               href: req.url || '/dav/',
@@ -452,9 +379,9 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
         )
         return
       }
-      const result = await getTyDirListing(davPath.subPath, session.cookies, depth)
+      const result = await getTyDirListing(davPath.subPath, session.cookies)
       if ('error' in result) {
-        res.status(404).setHeader('Content-Type', 'text/xml; charset="utf-8"').send(
+        res.status(404).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
           buildPropfindXml([
             {
               href: req.url || '/dav/',
@@ -467,13 +394,10 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
         return
       }
       resources = result.resources
-      if (depth === '0' && resources.length > 1) {
-        resources = resources.slice(0, 1)
-      }
     } else if (davPath.drive === 'od') {
       const accessToken = await getAccessToken()
       if (!accessToken) {
-        res.status(502).setHeader('Content-Type', 'text/xml; charset="utf-8"').send(
+        res.status(502).setHeader('Content-Type', 'application/xml; charset="utf-8"').send(
           buildPropfindXml([
             {
               href: req.url || '/dav/',
@@ -485,7 +409,7 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
         )
         return
       }
-      const result = await getOdDirListing(davPath.subPath, accessToken, depth)
+      const result = await getOdDirListing(davPath.subPath, accessToken)
       if ('error' in result) {
         res.status(404).setHeader('Content-Type', 'text/xml; charset="utf-8"').send(
           buildPropfindXml([
@@ -500,9 +424,6 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
         return
       }
       resources = result.resources
-      if (depth === '0' && resources.length > 1) {
-        resources = resources.slice(0, 1)
-      }
     }
 
     const xml = buildPropfindXml(resources)
