@@ -113,7 +113,7 @@ function toDavPath(pathname: string): string | null {
  * 把上游（Vercel）路径映射回 Worker 的 dav 路径空间，无法映射时返回 null。
  * 例如 /api/dav/OneDrive/ -> /dav/OneDrive/
  */
-function davPathFromUpstreamPathname(pathname: string): string | null {
+export function davPathFromUpstreamPathname(pathname: string): string | null {
   if (pathname === '/api/dav') return '/dav/'
   if (pathname.startsWith('/api/dav/')) return '/dav' + pathname.slice('/api/dav'.length)
   return null
@@ -125,7 +125,7 @@ function davPathFromUpstreamPathname(pathname: string): string | null {
  * /dav 只是 Worker 内部映射前缀，绝不能出现在返回给客户端的 URL 里。
  * 例如 /dav/OneDrive/ -> /OneDrive/，/dav/ -> /
  */
-function externalFromDavPath(davPath: string): string {
+export function externalFromDavPath(davPath: string): string {
   if (davPath === '/dav' || davPath === '/dav/') return '/'
   return davPath.slice('/dav'.length)
 }
@@ -208,17 +208,24 @@ export default {
     responseHeaders.set('Cache-Control', 'no-store')
     responseHeaders.delete('Set-Cookie')
 
-    // 兜底：仍有未跟随的 3xx 时，把 Location 改写成对外的根命名空间形式
-    // （不带 /dav 内部前缀），且绝不把源站域名泄漏给客户端
+    // 兜底：仍有未跟随的 3xx 时，按 Location 目标分三类处理：
+    // - 跨域（Graph / 天翼的文件下载直链）→ 原样保留，这是下载跳转的合法目标，
+    //   删掉它会让客户端收到没有目的地的 302，表现为所有文件都无法下载；
+    // - 同源且映射到 /api/dav/* → 改写成对外根命名空间形式（去掉 /dav 内部前缀）；
+    // - 同源但无法映射的异常路径 → 删除，避免泄漏内部结构。
     if (isRedirect(upstream.status) && responseHeaders.has('location')) {
       try {
         const location = responseHeaders.get('location') as string
         const next = new URL(location, getOriginUrl(origin, currentDavPath, currentSearch))
-        const mapped = next.origin === origin ? davPathFromUpstreamPathname(next.pathname) : null
-        if (mapped) {
-          responseHeaders.set('location', `${externalFromDavPath(mapped)}${next.search}`)
+        if (next.origin !== origin) {
+          // 跨域外部直链：保持原样
         } else {
-          responseHeaders.delete('location')
+          const mapped = davPathFromUpstreamPathname(next.pathname)
+          if (mapped) {
+            responseHeaders.set('location', `${externalFromDavPath(mapped)}${next.search}`)
+          } else {
+            responseHeaders.delete('location')
+          }
         }
       } catch {
         responseHeaders.delete('location')
