@@ -12,6 +12,8 @@ import { useTranslation } from 'next-i18next'
 import useLocalStorage from '../utils/useLocalStorage'
 import { getPreviewType, preview } from '../utils/getPreviewType'
 import { useProtectedSWRInfinite } from '../utils/fetchWithSWR'
+import useSWR from 'swr'
+import type { DrivesAvailability } from '../utils/driveAvailability'
 import { useExpandTransition } from '../utils/useExpandTransition'
 import { getExtension, getRawExtension, getFileIcon } from '../utils/getFileIcon'
 import { getStoredToken, Drive } from '../utils/protectedRouteHandler'
@@ -87,18 +89,19 @@ const queryToPath = (query?: ParsedUrlQuery) => {
  * - 天翼云盘：跳到 /Admin/天翼云盘（显示天翼云根目录）
  * - OneDrive：跳到 /Admin/OneDrive（显示 OneDrive 根目录）
  */
-function virtualAdminData(): any[] {
+function virtualAdminData(avail: DrivesAvailability): any[] {
   const children: OdFolderChildren[] = []
 
-  children.push({
-    id: VIRTUAL_TIANYI_FOLDER_ID,
+  if (avail.tianyi)
+    children.push({
+      id: VIRTUAL_TIANYI_FOLDER_ID,
     name: ADMIN_TY_FOLDER_NAME,
     size: 0,
     lastModifiedDateTime: new Date().toISOString(),
     folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
   })
 
-  if (ONEDRIVE_ENABLED) {
+  if (ONEDRIVE_ENABLED && avail.onedrive) {
     children.push({
       id: VIRTUAL_ONEDRIVE_FOLDER_ID,
       name: ADMIN_OD_FOLDER_NAME,
@@ -108,7 +111,7 @@ function virtualAdminData(): any[] {
     })
   }
 
-  if (P123_ENABLED) {
+  if (P123_ENABLED && avail.pan123) {
     children.push({
       id: VIRTUAL_P123_FOLDER_ID,
       name: ADMIN_P123_FOLDER_NAME,
@@ -247,8 +250,17 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
     setSize,
   } = useProtectedSWRInfinite(isVirtualAdmin ? '' : backendPath, apiBaseTyped, resolved.admin)
 
-  // /Admin 虚拟目录：构造两个云盘入口文件夹数据，不依赖云盘 API
-  const data = isVirtualAdmin ? virtualAdminData() : swrData
+  // 各网盘是否已配置凭据（未配置的不在列表中显示入口）。
+  // 加载完成前按"已配置"处理，避免入口闪现消失。
+  const { data: drivesAvail } = useSWR<DrivesAvailability>(
+    '/api/drives/',
+    url => fetch(url).then(r => r.json()).then((d: any) => d?.availability),
+    { revalidateOnFocus: false, dedupingInterval: 60_000 },
+  )
+  const avail: DrivesAvailability = drivesAvail ?? { tianyi: true, onedrive: true, pan123: true }
+
+  // /Admin 虚拟目录：构造云盘入口文件夹数据，不依赖云盘 API
+  const data = isVirtualAdmin ? virtualAdminData(avail) : swrData
 
   // === 文件列表展开动画（loading → measuring → expanding → done）===
   const isLoading = !data && !error
@@ -349,7 +361,7 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
         folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
       })
     }
-    if (ONEDRIVE_ENABLED) {
+    if (ONEDRIVE_ENABLED && avail.onedrive) {
       const odFolderName = siteConfig.onedriveMountPath.split('/').pop() || 'OneDrive'
       virtualFolders.push({
         id: VIRTUAL_ONEDRIVE_FOLDER_ID,
@@ -378,8 +390,8 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
           folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
         })
       }
-      // 注入 OneDrive 入口（无论是否登录）
-      if (ONEDRIVE_ENABLED) {
+      // 注入 OneDrive 入口（无论是否登录；未配置凭据则不显示）
+      if (ONEDRIVE_ENABLED && avail.onedrive) {
         const odFolderName = siteConfig.onedriveMountPath.split('/').pop() || 'OneDrive'
         if (!folderChildren.some(c => c.name === odFolderName)) {
           virtualFolders.push({
@@ -391,8 +403,8 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
           })
         }
       }
-      // 注入 123 云盘入口（无论是否登录）
-      if (P123_ENABLED) {
+      // 注入 123 云盘入口（无论是否登录；未配置凭据则不显示）
+      if (P123_ENABLED && avail.pan123) {
         const p123FolderName = siteConfig.pan123MountPath.split('/').pop() || ADMIN_P123_FOLDER_NAME
         if (!folderChildren.some(c => c.name === p123FolderName)) {
           virtualFolders.push({

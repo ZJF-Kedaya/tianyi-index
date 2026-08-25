@@ -15,10 +15,12 @@ import { getMimeType } from '../../../utils/mime'
 import { constantTimeEqual } from '../../../utils/constantTimeEqual'
 import { checkRateLimit } from '../../../utils/rateLimit'
 import { getClientIp } from '../../../utils/getClientIp'
-import { DAV_DRIVES, getDavDriveByName } from '../../../utils/driveRegistry'
+import { DAV_DRIVES, getDavDriveByName, filterRootDrivesByAvailability } from '../../../utils/driveRegistry'
 import { safeDecodeURIComponent } from '../../../utils/decode'
 import apiConfig from '../../../../config/api.config'
 import { getRuntimeConfigValue } from '../../../utils/runtimeConfigStore'
+import { getDrivesAvailability } from '../../../utils/driveAvailability'
+import { ADMIN_TY_FOLDER_NAME, ADMIN_P123_FOLDER_NAME } from '../../../utils/driveResolver'
 
 const DEFAULT_USER_ID = 'default_user'
 
@@ -493,6 +495,8 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
   try {
     let self: DavResource | null = null
     let resources: DavResource[] = []
+    // 未配置凭据的网盘视为不存在（根列表不展示，直接访问返回 404）
+    const avail = await getDrivesAvailability()
 
     if (davPath.drive === 'root') {
       // RFC 4918 §9.1：Depth 0/1 响应都必须包含请求资源自身。
@@ -506,8 +510,12 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
         lastModified: formatHttpDate(''),
       }
       const result = await getVirtualRootResources()
-      resources = result.resources
+      resources = filterRootDrivesByAvailability(result.resources, avail)
     } else if (davPath.drive === 'ty') {
+      if (!avail.tianyi) {
+        sendListingError(res, req.url, 404)
+        return
+      }
       const session = await getOrCreateTianyiSession()
       if ('error' in session) {
         // 会话故障是临时性问题，返回 502 而非 404，避免客户端把网盘当成不存在
@@ -522,6 +530,10 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
       self = result.self
       resources = result.resources
     } else if (davPath.drive === 'od') {
+      if (!avail.onedrive) {
+        sendListingError(res, req.url, 404)
+        return
+      }
       const accessToken = await getAccessToken()
       if (!accessToken) {
         sendListingError(res, req.url, 502)
@@ -535,6 +547,10 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
       self = result.self
       resources = result.resources
     } else if (davPath.drive === 'p123') {
+      if (!avail.pan123) {
+        sendListingError(res, req.url, 404)
+        return
+      }
       const result = await getP123DirListing(davPath.subPath)
       if ('error' in result) {
         sendListingError(res, req.url, listingErrorStatus(result.kind))
@@ -555,6 +571,8 @@ async function handlePropfind(req: NextApiRequest, res: NextApiResponse, davPath
 }
 
 async function handleGet(req: NextApiRequest, res: NextApiResponse, davPath: ParsedDavPath): Promise<void> {
+  // 未配置凭据的网盘视为不存在，直接访问返回 404
+  const avail = await getDrivesAvailability()
   if (davPath.drive === 'root') {
     res.status(400).json({ error: 'Cannot GET directory' })
     return
@@ -568,6 +586,10 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, davPath: Par
 
   try {
     if (davPath.drive === 'ty') {
+      if (!avail.tianyi) {
+        res.status(404).json({ error: 'Not found' })
+        return
+      }
       const session = await getOrCreateTianyiSession()
       if ('error' in session) {
         res.status(502).json({ error: session.error })
@@ -589,6 +611,10 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, davPath: Par
       }
       res.redirect(302, dlResult.data.url)
     } else if (davPath.drive === 'od') {
+      if (!avail.onedrive) {
+        res.status(404).json({ error: 'Not found' })
+        return
+      }
       const accessToken = await getAccessToken()
       if (!accessToken) {
         res.status(502).json({ error: 'OneDrive 未授权' })
@@ -608,6 +634,10 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, davPath: Par
         res.status(404).json({ error: 'No download url found' })
       }
     } else if (davPath.drive === 'p123') {
+      if (!avail.pan123) {
+        sendListingError(res, req.url, 404)
+        return
+      }
       const segments = davPath.subPath.split('/').filter(Boolean)
       if (segments.length === 0) {
         res.status(400).json({ error: 'Cannot download a folder' })

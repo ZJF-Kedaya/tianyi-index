@@ -1,16 +1,19 @@
-# TianYi-Index — 双云盘文件索引
+# TianYi-Index — 多网盘文件索引
 
-把你的**天翼云盘 + OneDrive** 同时挂载到一个可分享的文件站点。基于 Next.js 构建，天翼云后端走 cloud.189.cn API，OneDrive 后端走 Microsoft Graph API，两个网盘的文件出现在同一个网站的不同路径下。支持图片/视频/音频/PDF/Office/Markdown/EPUB/代码等多格式在线预览，多选打包下载，私密目录密码保护，8 种语言切换，配合 Vercel + Upstash Redis 实现零服务器部署。
+把你的**天翼云盘 + OneDrive + 123 云盘**同时挂载到一个可分享的文件站点。基于 Next.js 构建，天翼云后端走 cloud.189.cn API，OneDrive 后端走 Microsoft Graph API，123 云盘后端走 yun.123pan.com API，多个网盘的文件出现在同一个网站的不同路径下。支持图片/视频/音频/PDF/Office/Markdown/EPUB/代码等多格式在线预览，多选打包下载，私密目录密码保护，8 种语言切换，配合 Vercel + Upstash Redis 实现零服务器部署。
 
 ## 功能
 
-- 📁 同时挂载天翼云 + OneDrive 两个网盘
-- 🔀 天翼云默认在根目录 `/`，OneDrive 默认在 `/OneDrive`（均可通过环境变量配置）
+- 📁 同时挂载天翼云 + OneDrive + 123 云盘三个网盘
+- 🔀 天翼云默认在根目录 `/`，OneDrive 默认在 `/OneDrive`，123 云盘默认在 `/123云盘`（均可通过环境变量配置）
+- 📤 网页上传：管理员可在浏览器直接上传文件到 OneDrive（分片直传微软服务器）或天翼云盘（自动计算 MD5、支持秒传）
+- 🙈 未配置凭据的网盘不会出现在根目录和 WebDAV 中，零干扰
 - 🖼️ 文件预览：图片、视频、音频、PDF、Office、Markdown、EPUB、代码等
 - ⬇️ 文件下载（单选/多选打包/ZIP 递归下载）
 - 🌐 多语言（中文/English/日本語 等 8 种语言）
 - 🌗 毛玻璃主题 + 随机壁纸
-- 🔐 天翼云环境变量自动登录，OneDrive OAuth 2.0 refresh token
+- 🔐 天翼云环境变量自动登录，OneDrive OAuth 2.0 refresh token，123 云盘账号密码自动换取 JWT
+- 🛠️ 管理后台：状态总览 / 存储管理（三网盘连接测试）/ 访问控制 / 运行时配置 / 维护
 - 🔒 私密目录密码保护（两个网盘各自独立配置，在对应目录放 `.password` 文件）
 - 🌐 WebDAV 只读挂载：通过 Cloudflare Worker 独立子域名访问双云盘绝对根目录
 
@@ -52,10 +55,20 @@
 
 配置 OneDrive 后，访问 `/onedrive-index-oauth/step-1` 完成 OAuth 三步授权流程，将 refresh token 存入 Redis。
 
+#### 123 云盘（可选，不配置则不显示）
+
+| 变量 | 说明 |
+|------|------|
+| `P123_USERNAME` | 123 云盘账号（手机号） |
+| `P123_PASSWORD` | 123 云盘密码 |
+
+> 也可以不设环境变量，直接在管理后台「运行时配置」里填写 `P123_USERNAME` / `P123_PASSWORD`。
+
 #### 可选
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `NEXT_PUBLIC_123_MOUNT_PATH` | `/123云盘` | 123 云盘挂载路径。天翼云根目录会自动出现「123云盘」文件夹入口。设为空则禁用 123 云盘 |
 | `DEFAULT_FOLDER_ID` | `-11` | 天翼云默认浏览的文件夹 ID，`-11` 为根目录 |
 | `KV_PREFIX` | （空） | Redis 键前缀，多项目共用同一 Redis 时用于隔离 |
 | `TIANYI_UA` | （空） | 天翼云请求 User-Agent。留空则从内置 UA 池（6 条主流浏览器 UA）随机轮换，1 小时缓存一次。排查风控问题时可固定一个 UA |
@@ -74,7 +87,10 @@
 
 ### 运行时配置中心
 
-管理员登录 `/@manage` 后，在“运行时配置”中可以查看配置状态、修改非敏感配置、生成安全密钥并保存到 Redis。敏感值使用 `CONFIG_MASTER_KEY` 以 AES-256-GCM 加密后保存，主密钥只能配置在 Vercel Secret，不能放入 Redis。
+管理员登录 `/@manage` 后可以使用：
+
+- **存储管理**：三网盘卡片式状态展示，「测试全部连接」会实际调用各网盘接口校验凭据；未配置凭据的网盘不会出现在站点根目录与 WebDAV 中
+- **运行时配置**：查看配置状态、修改非敏感配置、生成安全密钥并保存到 Redis（支持 `P123_USERNAME` / `P123_PASSWORD`）。敏感值使用 `CONFIG_MASTER_KEY` 以 AES-256-GCM 加密后保存，主密钥只能配置在 Vercel Secret，不能放入 Redis
 
 Cloudflare Worker 管理需要配置 `CF_API_TOKEN`、`CF_ACCOUNT_ID` 和 `CF_WORKER_NAME`。后台可以查询 Worker 部署状态并同步 `WEBDAV_WORKER_SECRET`；Worker 代码部署仍使用：
 
@@ -102,12 +118,13 @@ WebDAV 客户端配置：
 | 用户名 | `admin` |
 | 密码 | 网站管理员登录密码（即 `/@login` 使用的 `ADMIN_PASSWORD`） |
 
-挂载后根目录会显示两个文件夹：
+挂载后根目录按配置情况显示网盘文件夹（未配置凭据的网盘不出现）：
 
 | 文件夹 | 对应远端目录 |
 |--------|--------------|
 | `天翼云盘` | 天翼云盘绝对根目录（固定 `-11`，不受 `DEFAULT_FOLDER_ID` 影响） |
 | `OneDrive` | OneDrive 绝对根目录（不受 `BASE_DIRECTORY` 影响） |
+| `123云盘` | 123 云盘绝对根目录 |
 
 实现方式：
 
@@ -217,8 +234,8 @@ node -e "const CryptoJS = require('crypto-js'); console.log(CryptoJS.AES.encrypt
 
 ## 技术栈
 
-- **框架**: Next.js 13 + TypeScript
+- **框架**: Next.js 15 + TypeScript + React 18
 - **样式**: Tailwind CSS + 毛玻璃效果
-- **后端**: Next.js API Routes → 天翼云 API + Microsoft Graph API
-- **存储**: Redis (Upstash) — 天翼云会话 Cookie + OneDrive OAuth Token
+- **后端**: Next.js API Routes → 天翼云 API + Microsoft Graph API + 123 云盘开放接口
+- **存储**: Redis (Upstash) — 天翼云会话 Cookie + OneDrive OAuth Token + 123 云盘 JWT
 - **部署**: Vercel (Serverless)

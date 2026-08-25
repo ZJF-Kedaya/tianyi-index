@@ -76,3 +76,17 @@ test('PROPFIND XML omits missing optional props instead of emitting blank lines'
   assert.ok(!xml.includes('\n\n'), 'should not contain blank lines from dropped props')
   assert.ok(!xml.includes('getcontentlength'))
 })
+
+test('root drive list hides unconfigured drives', async () => {
+  const { filterRootDrivesByAvailability } = await import('../src/utils/driveRegistry')
+  const mk = (name: string) => ({ displayName: name, href: `/${encodeURIComponent(name)}/` })
+  const all = [mk('天翼云盘'), mk('OneDrive'), mk('123云盘')]
+
+  // 全部配置：原样保留
+  assert.equal(filterRootDrivesByAvailability(all, { tianyi: true, onedrive: true, pan123: true }).length, 3)
+  // 只配置了 OneDrive：只留 OneDrive
+  const onlyOd = filterRootDrivesByAvailability(all, { tianyi: false, onedrive: true, pan123: false })
+  assert.deepEqual(onlyOd.map(r => r.displayName), ['OneDrive'])
+  // 全未配置：空列表
+  assert.equal(filterRootDrivesByAvailability(all, { tianyi: false, onedrive: false, pan123: false }).length, 0)
+})
