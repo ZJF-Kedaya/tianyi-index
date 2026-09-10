@@ -232,10 +232,36 @@ node -e "const CryptoJS = require('crypto-js'); console.log(CryptoJS.AES.encrypt
 
 两个网盘的私密目录互不影响，各自独立管理。
 
+## 部署到腾讯 EdgeOne Pages
+
+除 Vercel 外，本项目也可直接部署到腾讯云 EdgeOne Pages，代码无需改动，新增了 `edgeone.json` 作为平台配置。
+
+### 部署步骤
+
+1. 登录[腾讯云 EdgeOne 控制台](https://console.cloud.tencent.com/edgeone/pages)，选择「创建 Pages 项目」→「导入 Git 仓库」，关联本仓库。
+2. 项目配置会自动读取根目录的 `edgeone.json`，关键配置如下（无需手动填写）：
+
+| 配置项 | 值 |
+|--------|----|
+| 构建命令 | `pnpm run build` |
+| 安装命令 | `pnpm install` |
+| 输出目录 | `.next` |
+| Node 版本 | `20.18.0` |
+
+3. 在「环境变量」中配置与 Vercel 相同的变量（`TIANYI_USERNAME`、`TIANYI_PASSWORD`、`REDIS_URL`、`ADMIN_PASSWORD`、`UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN` 等），详见上方环境变量章节。
+4. 点击「开始部署」。
+
+### 与 Vercel 的差异说明
+
+- EdgeOne Pages 原生支持 Next.js 15 的 Pages Router、SSR 与 API Routes，`src/pages/api/*` 会自动部署为云函数，无需改造。
+- EdgeOne 暂不支持 Next.js 的 rewrites/redirects 配置，因此 `edgeone.json` 中显式配置了 `/@login`、`/@manage` 到实际页面的跳转；`/dav/*` 仅由 Cloudflare Worker 回源使用，Worker 直接请求 `/api/dav/*`，不受影响。
+- `middleware.ts` 运行在 Edge Runtime，管理后台的真实 session 校验依赖 `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`，迁移后需同样配置。
+- WebDAV 的 Cloudflare Worker 回源地址需通过 `UPSTREAM_ORIGIN` 指向 EdgeOne 分配的域名（默认写死的是 Vercel 域名）。
+
 ## 技术栈
 
 - **框架**: Next.js 15 + TypeScript + React 18
 - **样式**: Tailwind CSS + 毛玻璃效果
 - **后端**: Next.js API Routes → 天翼云 API + Microsoft Graph API + 123 云盘开放接口
 - **存储**: Redis (Upstash) — 天翼云会话 Cookie + OneDrive OAuth Token + 123 云盘 JWT
-- **部署**: Vercel (Serverless)
+- **部署**: Vercel / 腾讯 EdgeOne Pages (Serverless)
