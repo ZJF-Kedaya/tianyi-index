@@ -5,9 +5,6 @@ interface Env {
   /** 可选：WebDAV 登录用户名，未配置时默认 admin */
   WEBDAV_USERNAME?: string
 }
-  /** 可选：WebDAV 登录用户名，未配置时默认 admin */
-  WEBDAV_USERNAME?: string
-}
 
 const DEFAULT_UPSTREAM_ORIGIN = 'https://pan.xiegao.top'
 const FORWARDED_HEADERS = [
