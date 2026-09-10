@@ -28,6 +28,7 @@ import {
   ADMIN_TY_FOLDER_NAME,
   ADMIN_OD_FOLDER_NAME,
   ADMIN_P123_FOLDER_NAME,
+ROOT_TIANYI_FOLDER_NAME,
 } from '../utils/driveResolver'
 import siteConfig from '../../config/site.config'
 import { useIsAdmin } from '../utils/useIsAdmin'
@@ -95,11 +96,11 @@ function virtualAdminData(avail: DrivesAvailability): any[] {
   if (avail.tianyi)
     children.push({
       id: VIRTUAL_TIANYI_FOLDER_ID,
-    name: ADMIN_TY_FOLDER_NAME,
-    size: 0,
-    lastModifiedDateTime: new Date().toISOString(),
-    folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
-  })
+      name: ADMIN_TY_FOLDER_NAME,
+      size: 0,
+      lastModifiedDateTime: new Date().toISOString(),
+      folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
+    })
 
   if (ONEDRIVE_ENABLED && avail.onedrive) {
     children.push({
@@ -121,6 +122,25 @@ function virtualAdminData(avail: DrivesAvailability): any[] {
     })
   }
 
+  return [{ folder: { value: children } }]
+}
+
+/**
+ * 构造站点根虚拟目录数据：只显示一个天翼入口文件夹。
+ * 入口 name 取天翼挂载路径去掉前导斜杠（'/天翼' → '天翼'），
+ * 点击后 layout 用 name 拼路径，正好跳到 /天翼 加载真实内容。
+ */
+function virtualRootData(avail: DrivesAvailability): any[] {
+  const children: OdFolderChildren[] = []
+  if (avail.tianyi) {
+    children.push({
+      id: VIRTUAL_TIANYI_FOLDER_ID,
+      name: ROOT_TIANYI_FOLDER_NAME,
+      size: 0,
+      lastModifiedDateTime: new Date().toISOString(),
+      folder: { childCount: 0, view: { sortBy: 'name', sortOrder: 'ascending', viewType: 'thumbnails' } },
+    })
+  }
   return [{ folder: { value: children } }]
 }
 
@@ -232,9 +252,13 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
   // 虚拟根目录不会触发认证/下载，统一转成 'ty' 兼容 Drive 类型
   const normalizedDrive: Drive = drive === 'virtual' ? 'ty' : drive
 
-  // /Admin 虚拟目录：不调用云盘 API，直接显示两个云盘入口文件夹
+  // /Admin 虚拟目录：不调用云盘 API，直接显示各云盘入口文件夹
   // 注意：用 drive === 'virtual' 判断（resolveDrive 读 window.__isAdmin 同步可用）
-  const isVirtualAdmin = drive === 'virtual'
+  // 站点根虚拟目录（mountPath === '/'）与 /Admin 虚拟目录（mountPath === '/Admin'）都返回
+  // drive === 'virtual'，靠 mountPath 区分：站点根只显示天翼入口，/Admin 显示全部入口。
+  const isVirtual = drive === 'virtual'
+  const isVirtualRoot = isVirtual && resolved.mountPath === '/'
+  const isVirtualAdmin = isVirtual && !isVirtualRoot
 
   const path = queryToPath(query)
   // 后端 API 使用剥离挂载前缀的相对路径；前端展示用原始 path
@@ -248,7 +272,7 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
     error,
     size,
     setSize,
-  } = useProtectedSWRInfinite(isVirtualAdmin ? '' : backendPath, apiBaseTyped, resolved.admin)
+  } = useProtectedSWRInfinite(isVirtual ? '' : backendPath, apiBaseTyped, resolved.admin)
 
   // 各网盘是否已配置凭据（未配置的不在列表中显示入口）。
   // 加载完成前按"已配置"处理，避免入口闪现消失。
@@ -259,8 +283,10 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
   )
   const avail: DrivesAvailability = drivesAvail ?? { tianyi: true, onedrive: true, pan123: true }
 
-  // /Admin 虚拟目录：构造云盘入口文件夹数据，不依赖云盘 API
-  const data = isVirtualAdmin ? virtualAdminData(avail) : swrData
+  // 虚拟目录：构造入口文件夹数据，不依赖云盘 API
+  // - 站点根（isVirtualRoot）：只显示天翼入口
+  // - /Admin（isVirtualAdmin）：显示全部已配置云盘入口
+  const data = isVirtualAdmin ? virtualAdminData(avail) : isVirtualRoot ? virtualRootData(avail) : swrData
 
   // === 文件列表展开动画（loading → measuring → expanding → done）===
   const isLoading = !data && !error
@@ -585,7 +611,7 @@ const FileListing: FC<{ query?: ParsedUrlQuery; ssrIsAdmin?: boolean }> = ({ que
       <Toaster />
 
       {/* 上传入口（管理员 + 支持上传的云盘可见） */}
-      {!isVirtualAdmin && (
+      {!isVirtual && (
         <div className="mb-2 flex justify-end">
           <UploadButton dirPath={backendPath} drive={normalizedDrive} />
         </div>

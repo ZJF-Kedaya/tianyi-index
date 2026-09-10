@@ -107,6 +107,20 @@ export function resolveDrive(urlPath: string): DriveResolution {
 
   const isAdmin = getIsAdmin()
 
+  // === 站点根虚拟目录 ===
+  // 天翼云挂载在非根路径（如 /天翼）时，根目录 '/' 应当只显示天翼云入口文件夹，
+  // 点击进入 /天翼 才加载真实的天翼云内容。
+  // 若天翼云本身挂在根目录 '/'，则根目录就是天翼云本身，不做虚拟化。
+  if (cleanPath === '/' && TY_MOUNT !== '/') {
+    return {
+      drive: 'virtual',
+      apiBase: '/api/ty',
+      relPath: '/',
+      mountPath: '/',
+      admin: false,
+    }
+  }
+
   // === 管理员虚拟路径（登录后生效，必须在天翼云默认匹配之前） ===
 
   // /Admin → virtual（显示各云盘入口文件夹）
@@ -237,9 +251,16 @@ export const P123_ENABLED = Boolean(P123_MOUNT)
  */
 // 主页天翼云根目录注入的 Admin 入口文件夹
 export const VIRTUAL_ADMIN_FOLDER_ID = '__virtual_admin__'
-// /Admin 下的天翼云入口
+// /Admin 下的天翼云入口（站点根虚拟目录复用同一 id，靠 mountPath 区分）
 export const VIRTUAL_TIANYI_FOLDER_ID = '__virtual_tianyi__'
 // /Admin 下的 OneDrive 入口
 export const VIRTUAL_ONEDRIVE_FOLDER_ID = '__virtual_onedrive__'
 // /Admin 下的 123 云盘入口
 export const VIRTUAL_P123_FOLDER_ID = '__virtual_p123__'
+
+/**
+ * 站点根虚拟目录入口的 name。
+ * 取天翼挂载路径去掉前导斜杠（如 '/天翼' → '天翼'），
+ * 点击后 FolderListLayout/FolderGridLayout 用 name 拼路径，正好跳到 /天翼。
+ */
+export const ROOT_TIANYI_FOLDER_NAME = TY_MOUNT.replace(/^\//, '') || '天翼'
