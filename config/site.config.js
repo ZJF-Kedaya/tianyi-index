@@ -21,10 +21,10 @@ module.exports = {
   ogImage: process.env.NEXT_PUBLIC_SITE_OG_IMAGE || '/android-chrome-512x512.png',
 
   // === 双云盘挂载路径配置 ===
-  // 天翼云挂载到网站的哪个路径（默认根目录 /）
+  // 天翼云挂载到网站的哪个路径（默认 /天翼）
   // 环境变量 NEXT_PUBLIC_TIANYI_MOUNT_PATH 优先（需 NEXT_PUBLIC_ 前缀，前端 driveResolver 要读取）
   // 设为空字符串则不启用天翼云挂载
-  tianyiMountPath: normalizeMountPath(process.env.NEXT_PUBLIC_TIANYI_MOUNT_PATH || '/'),
+  tianyiMountPath: normalizeMountPath(process.env.NEXT_PUBLIC_TIANYI_MOUNT_PATH || '/天翼'),
 
   // OneDrive 挂载到网站的哪个路径（默认 /OneDrive）
   // 环境变量 NEXT_PUBLIC_ONEDRIVE_MOUNT_PATH 优先（需 NEXT_PUBLIC_ 前缀，前端要读取）

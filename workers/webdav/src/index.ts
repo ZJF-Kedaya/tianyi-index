@@ -2,6 +2,11 @@ interface Env {
   WEBDAV_WORKER_SECRET: string
   /** 可选：回源地址覆盖（默认 https://pan.xiegao.top），便于本地联调 */
   UPSTREAM_ORIGIN?: string
+  /** 可选：WebDAV 登录用户名，未配置时默认 admin */
+  WEBDAV_USERNAME?: string
+}
+  /** 可选：WebDAV 登录用户名，未配置时默认 admin */
+  WEBDAV_USERNAME?: string
 }
 
 const DEFAULT_UPSTREAM_ORIGIN = 'https://pan.xiegao.top'
@@ -151,7 +156,8 @@ export default {
 
     if (request.method !== 'OPTIONS') {
       const credentials = getBasicCredentials(request)
-      if (!credentials || credentials.username !== 'admin' || !(await isValidAdminPassword(credentials.password, origin))) {
+      const expectedUser = env.WEBDAV_USERNAME || 'admin'
+      if (!credentials || credentials.username !== expectedUser || !(await isValidAdminPassword(credentials.password, origin))) {
         return unauthorized()
       }
     }
