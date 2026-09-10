@@ -38,30 +38,12 @@ import {
   faCopy as faCopySolid,
   faAngleRight,
   faDownload,
-  faMusic,
-  faArrowLeft,
-  faArrowRight,
-  faFileDownload,
-  faUndo,
-  faBook,
-  faKey,
-  faSignOutAlt,
-  faCloud,
-  faChevronCircleDown,
-  faChevronDown,
-  faLink,
-  faExternalLinkAlt,
-  faExclamationCircle,
-  faExclamationTriangle,
   faTh,
   faThLarge,
   faThList,
-  faHome,
   faLanguage,
   faCube,
 } from '@fortawesome/free-solid-svg-icons'
-// 按需 import 常用 brand 图标，避免 import * as Icons 全量打包 500+ 图标
-// 如需新增 brand 图标，在此 import 并加入 brandIconMap 即可
 import {
   faGithub,
   faGitlab,
@@ -71,20 +53,10 @@ import {
   faBilibili,
   faQq,
   faWeixin,
-  faTwitter,
-  faFacebook,
-  faInstagram,
-  faLinkedin,
-  faYoutube,
-  faTiktok,
-  faTwitch,
   faTelegram,
+  faXTwitter,
   faDiscord,
-  faSlack,
-  faReddit,
-  faMedium,
-  faMastodon,
-  faSteam,
+  faYoutube,
   faMarkdown,
 } from '@fortawesome/free-brands-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
@@ -96,6 +68,23 @@ import { appWithTranslation } from 'next-i18next'
 import siteConfig from '../../config/site.config'
 import { useIsAdmin } from '../utils/useIsAdmin'
 
+// i18n 配置内联于此，与 next.config.js 保持一致。
+// 原因：EdgeOne/OpenNext 运行期按 ESM 加载 next-i18next.config.js，读不到 CommonJS 的导出，
+// 导致 appWithTranslation was called without config.i18n。这里显式传入配置，彻底规避该问题。
+const i18nConfig = {
+  i18n: {
+    defaultLocale: 'zh-CN',
+    locales: ['de-DE', 'en', 'es', 'zh-CN', 'hi', 'id', 'tr-TR', 'zh-TW'],
+    localeDetection: false,
+  },
+  localePath: '/public/locales',
+  reloadOnPrerender: process.env.NODE_ENV === 'development',
+  keySeparator: false,
+  namespaceSeparator: false,
+  pluralSeparator: '——',
+  contextSeparator: '——',
+}
+
 // 常用 brand 图标映射：key 是 siteConfig.links 里 name 的小写形式
 const brandIconMap: Record<string, IconDefinition> = {
   github: faGithub,
@@ -106,38 +95,56 @@ const brandIconMap: Record<string, IconDefinition> = {
   bilibili: faBilibili,
   qq: faQq,
   weixin: faWeixin,
-  wechat: faWeixin,
-  twitter: faTwitter,
-  facebook: faFacebook,
-  instagram: faInstagram,
-  linkedin: faLinkedin,
-  youtube: faYoutube,
-  tiktok: faTiktok,
-  twitch: faTwitch,
   telegram: faTelegram,
+  twitter: faXTwitter,
+  x: faXTwitter,
   discord: faDiscord,
-  slack: faSlack,
-  reddit: faReddit,
-  medium: faMedium,
-  mastodon: faMastodon,
-  steam: faSteam,
+  youtube: faYoutube,
+  markdown: faMarkdown,
 }
 
-// 只注册配置中实际用到的 brand 图标 + md 文件图标（按需加载，避免全量打包）
-const usedBrandIcons: IconDefinition[] = siteConfig.links
-  .map(l => brandIconMap[l.name.toLowerCase()])
-  .filter((icon): icon is IconDefinition => Boolean(icon))
+const usedBrandIcons = Array.from(
+  new Set(
+    Object.values(siteConfig.links || {})
+      .map((link: { name?: string }) => link?.name?.toLowerCase())
+      .filter((name): name is string => !!name && name in brandIconMap)
+      .map(name => brandIconMap[name])
+  )
+)
 
 library.add(
-  faFileImage, faFilePdf, faFileWord, faFilePowerpoint, faFileExcel,
-  faFileAudio, faFileVideo, faFileArchive, faFileCode, faFileAlt,
-  faFile, faFlag, faFolder, faMusic, faArrowLeft, faArrowRight,
-  faAngleRight, faFileDownload, faCopy, faCopySolid, faPlus, faMinus,
-  faDownload, faLink, faUndo, faBook, faArrowAltCircleDown, faKey,
-  faTrashAlt, faSignOutAlt, faEnvelope, faCloud, faChevronCircleDown,
-  faExternalLinkAlt, faExclamationCircle, faExclamationTriangle,
-  faHome, faCheck, faCheckCircle, faSearch, faChevronDown,
-  faTh, faThLarge, faThList, faLanguage, faPen, faCube,
+  faFileImage,
+  faFilePdf,
+  faFileWord,
+  faFilePowerpoint,
+  faFileExcel,
+  faFileAudio,
+  faFileVideo,
+  faFileArchive,
+  faFileCode,
+  faFileAlt,
+  faFile,
+  faFolder,
+  faCopy,
+  faArrowAltCircleDown,
+  faTrashAlt,
+  faEnvelope,
+  faFlag,
+  faCheckCircle,
+  faSearch,
+  faPen,
+  faCheck,
+  faPlus,
+  faMinus,
+  faCopySolid,
+  faAngleRight,
+  faDownload,
+  faTh,
+  faThLarge,
+  faThList,
+  faLanguage,
+  faPen,
+  faCube,
   faMarkdown,
   ...usedBrandIcons
 )
@@ -159,4 +166,4 @@ function MyApp({ Component, pageProps }: AppProps) {
   )
 }
 
-export default appWithTranslation(MyApp)
+export default appWithTranslation(MyApp, i18nConfig)

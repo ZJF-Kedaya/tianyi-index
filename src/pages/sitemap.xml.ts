@@ -1,5 +1,4 @@
 import type { GetServerSidePropsContext } from 'next'
-import i18nConfig from '../../next-i18next.config'
 import siteConfig from '../../config/site.config'
 
 /**
@@ -19,8 +18,8 @@ function SitemapPage() {
   return null
 }
 
-const LOCALES = i18nConfig.i18n.locales as string[]
-const DEFAULT_LOCALE = i18nConfig.i18n.defaultLocale
+const LOCALES = ['de-DE', 'en', 'es', 'zh-CN', 'hi', 'id', 'tr-TR', 'zh-TW']
+const DEFAULT_LOCALE = 'zh-CN'
 
 // 返回某 locale 下的 URL（默认 locale 不带前缀，其余带 /locale 前缀）
 function localizedUrl(baseUrl: string, locale: string, path: string): string {

@@ -1,5 +1,15 @@
-const { i18n } = require('./next-i18next.config')
 const { execSync } = require('child_process')
+
+// i18n 配置内联于此，不再依赖外部 next-i18next.config.js。
+// 原因：EdgeOne/OpenNext 构建期用 CJS require 加载配置，运行期却按 ESM 加载 next-i18next.config.js，
+// 同一文件被两种模块系统加载必然有一边取不到值（export 报错或 config.i18n undefined）。
+// next.config.js 只在构建期被 Node 加载，内联后彻底规避该矛盾。
+const i18n = {
+  defaultLocale: 'zh-CN',
+  locales: ['de-DE', 'en', 'es', 'zh-CN', 'hi', 'id', 'tr-TR', 'zh-TW'],
+  // 关闭自动语言检测，直接使用默认语言，避免重定向耗时
+  localeDetection: false,
+}
 
 // 构建期一次性获取 git 信息，注入到 process.env 供前端组件读取
 let gitCommitHash = 'unknown'

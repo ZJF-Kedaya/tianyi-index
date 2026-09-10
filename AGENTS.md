@@ -61,7 +61,7 @@ Translation key extraction: `pnpm run extract` (runs `i18next-parser`).
 
 - `config/api.config.js` — OneDrive OAuth endpoints, cache headers
 - `config/site.config.js` — Mount paths, protected routes, fonts, site metadata (reads env vars at build time)
-- `next-i18next.config.js` — locale list, path to locale files
+- `next.config.js` — locale list（内联 i18n 配置）, path to locale files
 - `tailwind.config.js` — reads `site.config.js` for font families
 
 ### WebDAV Worker (`workers/webdav/`)
