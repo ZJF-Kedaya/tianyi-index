@@ -14,7 +14,7 @@ module.exports = {
   defaultNamespace: 'common',
   defaultValue: (lng, _ns, key) => (lng === i18n.defaultLocale ? key : ''),
   keySeparator: false,
-  namespaceSeparator: false,
+  nsSeparator: false,
   pluralSeparator: '——',
   contextSeparator: '——',
   lineEnding: 'lf',

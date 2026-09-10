@@ -65,13 +65,17 @@ import type { AppProps } from 'next/app'
 import NextNProgress from 'nextjs-progressbar'
 import BackgroundImage from '../components/BackgroundImage'
 import { appWithTranslation } from 'next-i18next'
+import type { UserConfig } from 'next-i18next'
 import siteConfig from '../../config/site.config'
 import { useIsAdmin } from '../utils/useIsAdmin'
 
 // i18n 配置内联于此，与 next.config.js 保持一致。
 // 原因：EdgeOne/OpenNext 运行期按 ESM 加载 next-i18next.config.js，读不到 CommonJS 的导出，
 // 导致 appWithTranslation was called without config.i18n。这里显式传入配置，彻底规避该问题。
-const i18nConfig = {
+// 注意：必须显式标注 UserConfig 类型，否则 i18n.localeDetection 会被推断为 boolean，
+// 与 next-i18next 声明的字面量 false 不兼容；用 as const 又会让 locales 变成 readonly。
+// 分隔符等 i18next 初始化选项无需在此重复，运行期 appWithTranslation 只需 i18n 与 localePath。
+const i18nConfig: UserConfig = {
   i18n: {
     defaultLocale: 'zh-CN',
     locales: ['de-DE', 'en', 'es', 'zh-CN', 'hi', 'id', 'tr-TR', 'zh-TW'],
@@ -79,10 +83,6 @@ const i18nConfig = {
   },
   localePath: '/public/locales',
   reloadOnPrerender: process.env.NODE_ENV === 'development',
-  keySeparator: false,
-  namespaceSeparator: false,
-  pluralSeparator: '——',
-  contextSeparator: '——',
 }
 
 // 常用 brand 图标映射：key 是 siteConfig.links 里 name 的小写形式
